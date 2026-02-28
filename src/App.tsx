@@ -186,7 +186,8 @@ const dict = {
   },
 }
 
-const profileNameCache = new Map<string, string | null>()
+const profileNameCache = new Map<string, { value: string | null; ts: number }>()
+const PROFILE_CACHE_TTL = 5 * 60 * 1000
 
 const shorten = (value?: string) => {
   if (!value) return '—'
@@ -489,14 +490,23 @@ function App() {
     const load = async () => {
       const updates: Record<string, string | null> = {}
       for (const peerLower of targets) {
-        if (profileNameCache.has(peerLower)) continue
+        const cached = profileNameCache.get(peerLower)
+        if (cached) {
+          const isFresh = Date.now() - cached.ts < PROFILE_CACHE_TTL
+          if (cached.value || isFresh) {
+            if (cached.value) {
+              updates[peerLower] = cached.value
+            }
+            continue
+          }
+        }
         try {
           const response = await fetch(
             `https://backend.portal.abs.xyz/api/user/address/${peerLower}`,
             { signal: controller.signal }
           )
           if (!response.ok) {
-            profileNameCache.set(peerLower, null)
+            profileNameCache.set(peerLower, { value: null, ts: Date.now() })
             updates[peerLower] = null
             continue
           }
@@ -505,11 +515,11 @@ function App() {
             typeof data?.user?.name === 'string' && data.user.name.trim()
               ? data.user.name.trim()
               : null
-          profileNameCache.set(peerLower, name)
+          profileNameCache.set(peerLower, { value: name, ts: Date.now() })
           updates[peerLower] = name
         } catch (err) {
           if ((err as Error).name === 'AbortError') return
-          profileNameCache.set(peerLower, null)
+          profileNameCache.set(peerLower, { value: null, ts: Date.now() })
           updates[peerLower] = null
         }
       }

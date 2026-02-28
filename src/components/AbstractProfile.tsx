@@ -10,7 +10,8 @@ interface AbstractProfileProps {
   shineColor?: string
 }
 
-const avatarCache = new Map<string, string | null>()
+const avatarCache = new Map<string, { value: string | null; ts: number }>()
+const AVATAR_CACHE_TTL = 5 * 60 * 1000
 
 const imageUrlRegex = /https?:\/\/[^"'\s]+?\.(?:png|jpe?g|webp|gif)(?:\?[^"'\s]*)?/i
 
@@ -62,8 +63,8 @@ export function AbstractProfile({
 
   const resolvedAddress = (address ?? connectedAddress ?? '').toString()
   const normalizedAddress = resolvedAddress.trim().toLowerCase()
-  const cachedSrc = normalizedAddress ? avatarCache.get(normalizedAddress) : null
-  const remoteSrc = cachedSrc ?? null
+  const cachedEntry = normalizedAddress ? avatarCache.get(normalizedAddress) : null
+  const remoteSrc = cachedEntry?.value ?? null
   const fallbackStage = normalizedAddress ? (fallbackStages[normalizedAddress] ?? 0) : 0
   const currentSrc =
     fallbackStage === 2
@@ -83,8 +84,10 @@ export function AbstractProfile({
     if (!normalizedAddress) {
       return
     }
-    if (avatarCache.has(normalizedAddress)) {
-      return
+    const cached = avatarCache.get(normalizedAddress)
+    if (cached) {
+      const isFresh = Date.now() - cached.ts < AVATAR_CACHE_TTL
+      if (cached.value || isFresh) return
     }
     let isActive = true
     const controller = new AbortController()
@@ -107,7 +110,7 @@ export function AbstractProfile({
             found = match ? match[0] : null
           }
           if (found) {
-            avatarCache.set(normalizedAddress, found)
+            avatarCache.set(normalizedAddress, { value: found, ts: Date.now() })
             if (isActive) setCacheVersion((prev) => prev + 1)
             return
           }
@@ -115,7 +118,7 @@ export function AbstractProfile({
           if ((err as Error).name === 'AbortError') return
         }
       }
-      avatarCache.set(normalizedAddress, null)
+      avatarCache.set(normalizedAddress, { value: null, ts: Date.now() })
     }
     load()
     return () => {
