@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Abstract Messenger — Documentation</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+        background: radial-gradient(circle at top, #0a1410, #060a08 55%, #050705 100%);
+        color: #e9f7ef;
+      }
+      .wrap {
+        max-width: 900px;
+        margin: 40px auto;
+        padding: 0 20px 40px;
+      }
+      .card {
+        background: rgba(10, 16, 12, 0.92);
+        border: 1px solid rgba(66, 190, 120, 0.2);
+        border-radius: 18px;
+        box-shadow: 0 18px 40px rgba(2, 10, 6, 0.6);
+        padding: 24px;
+      }
+      h1, h2, h3 {
+        margin: 0 0 12px;
+      }
+      h1 {
+        font-size: 26px;
+      }
+      h2 {
+        font-size: 20px;
+        margin-top: 20px;
+      }
+      p, li {
+        color: rgba(200, 255, 220, 0.85);
+        line-height: 1.7;
+      }
+      a {
+        color: #19f18a;
+        text-decoration: none;
+        border-bottom: 1px solid rgba(25, 241, 138, 0.3);
+      }
+      a:hover {
+        border-color: #19f18a;
+      }
+      .muted {
+        color: rgba(180, 235, 210, 0.7);
+        font-size: 14px;
+      }
+      .list {
+        padding-left: 18px;
+      }
+      .footer {
+        margin-top: 12px;
+        font-size: 13px;
+        color: rgba(185, 230, 208, 0.7);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="card">
+        <h1>Abstract Messenger — Documentation</h1>
+        <p class="muted">Anonymous, end-to-end encrypted messaging on AbstractChain.</p>
+
+        <h2>Overview</h2>
+        <p>
+          Abstract Messenger enables private chats using end-to-end encryption. Messages are
+          transmitted as on-chain transactions on AbstractChain, and mirrored to an indexed
+          datastore to enable fast retrieval and cross-device availability.
+        </p>
+
+        <h2>Key Advantages over Web2</h2>
+        <ul class="list">
+          <li><strong>Anonymity:</strong> Chats are address-based; no email/phone/SSO.</li>
+          <li><strong>Ownership:</strong> Messages are tied to your wallet; no centralized accounts.</li>
+          <li><strong>Security:</strong> Content is encrypted end-to-end using modern crypto (AES‑GCM).</li>
+          <li><strong>Portability:</strong> History can be reconstructed from chain, independent of any single server.</li>
+          <li><strong>Transparency:</strong> Message metadata is verifiable; payloads remain unreadable to others.</li>
+        </ul>
+
+        <h2>How Encryption Works</h2>
+        <p>
+          For each conversation, a shared key is derived deterministically from both participants’ addresses.
+          The payload is encrypted using AES‑GCM with a random IV. Only participants can compute the correct key and decrypt.
+        </p>
+        <ul class="list">
+          <li>Key derivation: PBKDF2 + conversation salt (SHA‑256 of sorted addresses).</li>
+          <li>Cipher: AES‑GCM (256‑bit), random IV per message.</li>
+          <li>Prefix: <code>enc:v1:&lt;iv_base64&gt;:&lt;ciphertext_base64&gt;</code> for safe transport.</li>
+        </ul>
+
+        <h2>Realtime and Reliability</h2>
+        <ul class="list">
+          <li>Realtime: Supabase Postgres changes subscriptions for instant updates.</li>
+          <li>Fallback: Periodic polling ensures delivery when realtime is unavailable.</li>
+          <li>Recovery: A light chain scanner can reconstruct missing messages from on-chain data.</li>
+        </ul>
+
+        <h2>Profiles and Identity</h2>
+        <ul class="list">
+          <li>Avatars and usernames are pulled from Abstract Portal by wallet address.</li>
+          <li>If no on-chain username is set, a local nickname can be applied.</li>
+          <li>When no nickname exists, the UI falls back to a shortened address.</li>
+        </ul>
+
+        <h2>Presence and Read Status</h2>
+        <ul class="list">
+          <li>Online status reflects when the other participant has your chat open.</li>
+          <li>Typing indicators appear in real time while the other user is composing.</li>
+          <li>Read receipts show when the latest outgoing message has been seen.</li>
+        </ul>
+
+        <h2>Session Sending</h2>
+        <p>
+          Session sending allows pre-authorized message transmissions without per-message wallet prompts.
+          Implementation typically relies on smart wallet session keys or permissioned delegates. This UI
+          includes a “Create Session” control and persistence, ready to be wired to wallet APIs that support sessions.
+        </p>
+
+        <h2>Interface</h2>
+        <ul class="list">
+          <li>Liquid-glass visual system with layered blur and neon accents.</li>
+          <li>Mobile-friendly layout with stacked panels and touch-ready controls.</li>
+        </ul>
+
+        <h2>Privacy Notes</h2>
+        <ul class="list">
+          <li>Payloads are unreadable without the conversation key.</li>
+          <li>Addresses and timestamps are public on-chain.</li>
+          <li>Consider using fresh addresses for stronger unlinkability.</li>
+        </ul>
+
+        <h2>Getting Started</h2>
+        <ul class="list">
+          <li>Connect AGW.</li>
+          <li>Enter a peer address to start a conversation.</li>
+          <li>Write a message and sign the transaction.</li>
+        </ul>
+
+        <div class="footer">
+          Built on AbstractChain. Follow <a href="https://x.com/arsii_eth" target="_blank" rel="noopener">arsii_eth</a>.
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
