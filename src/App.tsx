@@ -502,7 +502,7 @@ function App() {
         }
         try {
           const response = await fetch(
-            `https://backend.portal.abs.xyz/api/user/address/${peerLower}`,
+            `/api/portal?address=${encodeURIComponent(peerLower)}`,
             { signal: controller.signal }
           )
           if (!response.ok) {

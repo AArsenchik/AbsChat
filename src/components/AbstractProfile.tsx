@@ -92,7 +92,7 @@ export function AbstractProfile({
     let isActive = true
     const controller = new AbortController()
     const endpoints = [
-      `https://backend.portal.abs.xyz/api/user/address/${normalizedAddress}`,
+      `/api/portal?address=${encodeURIComponent(normalizedAddress)}`,
     ]
     const load = async () => {
       for (const url of endpoints) {
