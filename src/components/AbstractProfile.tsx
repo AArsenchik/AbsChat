@@ -15,38 +15,6 @@ const AVATAR_CACHE_TTL = 5 * 60 * 1000
 
 const imageUrlRegex = /https?:\/\/[^"'\s]+?\.(?:png|jpe?g|webp|gif)(?:\?[^"'\s]*)?/i
 
-const hashString = (value: string) => {
-  let hash = 0
-  for (let i = 0; i < value.length; i += 1) {
-    hash = (hash << 5) - hash + value.charCodeAt(i)
-    hash |= 0
-  }
-  return hash >>> 0
-}
-
-const createIdenticonDataUrl = (seed: string, size: number) => {
-  const hash = hashString(seed)
-  const hue = hash % 360
-  const color = `hsl(${hue}, 70%, 52%)`
-  const background = '#0b1b14'
-  const cells: string[] = [`<rect width="5" height="5" fill="${background}" />`]
-  let bitIndex = 0
-  for (let y = 0; y < 5; y += 1) {
-    for (let x = 0; x < 3; x += 1) {
-      const bit = (hash >> bitIndex) & 1
-      if (bit) {
-        cells.push(`<rect x="${x}" y="${y}" width="1" height="1" fill="${color}" />`)
-        if (x !== 4 - x) {
-          cells.push(`<rect x="${4 - x}" y="${y}" width="1" height="1" fill="${color}" />`)
-        }
-      }
-      bitIndex += 1
-    }
-  }
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 5 5" width="${size}" height="${size}">${cells.join('')}</svg>`
-  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`
-}
-
 function findImageUrl(data: unknown): string | null {
   if (!data) return null
   if (typeof data === 'string') {
@@ -98,16 +66,12 @@ export function AbstractProfile({
   const cachedEntry = normalizedAddress ? avatarCache.get(normalizedAddress) : null
   const remoteSrc = cachedEntry?.value ?? null
   const fallbackStage = normalizedAddress ? (fallbackStages[normalizedAddress] ?? 0) : 0
-  const identiconSize = size === 'lg' ? 64 : size === 'sm' ? 24 : 40
-  const identiconSrc = normalizedAddress
-    ? createIdenticonDataUrl(normalizedAddress, identiconSize)
-    : null
-  const sources = [
-    ...(remoteSrc ? [remoteSrc] : []),
-    ...(identiconSrc ? [identiconSrc] : []),
-    '/bpengu.png',
-  ]
-  const currentSrc = sources[Math.min(fallbackStage, sources.length - 1)] ?? null
+  const currentSrc =
+    fallbackStage === 2
+      ? null
+      : fallbackStage === 1
+        ? '/bpengu.png'
+        : remoteSrc ?? '/bpengu.png'
   const fallbackText =
     fallback ??
     (resolvedAddress
@@ -188,7 +152,10 @@ export function AbstractProfile({
             if (!normalizedAddress) return
             setFallbackStages((prev) => {
               const stage = prev[normalizedAddress] ?? 0
-              if (stage >= sources.length - 1) return prev
+              if (stage >= 2) return prev
+              if (stage === 0 && !remoteSrc) {
+                return { ...prev, [normalizedAddress]: 2 }
+              }
               return { ...prev, [normalizedAddress]: stage + 1 }
             })
           }}

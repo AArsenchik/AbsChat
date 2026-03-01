@@ -189,21 +189,6 @@ const dict = {
 const profileNameCache = new Map<string, { value: string | null; ts: number }>()
 const PROFILE_CACHE_TTL = 5 * 60 * 1000
 
-const hashString = (value: string) => {
-  let hash = 0
-  for (let i = 0; i < value.length; i += 1) {
-    hash = (hash << 5) - hash + value.charCodeAt(i)
-    hash |= 0
-  }
-  return hash >>> 0
-}
-
-const makeAlias = (value?: string) => {
-  if (!value) return null
-  const hash = hashString(value).toString(36).toUpperCase().padStart(4, '0')
-  return `ABS-${hash.slice(0, 4)}`
-}
-
 const shorten = (value?: string) => {
   if (!value) return '—'
   return `${value.slice(0, 6)}…${value.slice(-4)}`
@@ -549,19 +534,6 @@ function App() {
       controller.abort()
     }
   }, [peers, activePeer, activePeerValid])
-
-  const getDisplayName = useCallback(
-    (peer: string) => {
-      const peerLower = peer.toLowerCase()
-      return (
-        profileNames[peerLower] ??
-        peerNicknames[peerLower] ??
-        makeAlias(peerLower) ??
-        shorten(peer)
-      )
-    },
-    [peerNicknames, profileNames]
-  )
 
   const unreadPeers = useMemo(() => {
     if (!address) return {}
@@ -1595,7 +1567,7 @@ function App() {
                       <AbstractProfile address={peer} size="md" />
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', overflow: 'hidden', flex: 1, minWidth: 0 }}>
                         <span className="peer__address" style={{ width: '100%' }}>
-                          {getDisplayName(peer)}
+                          {(profileNames[peerLower] ?? peerNicknames[peerLower]) || shorten(peer)}
                         </span>
                         {isEditing && !profileNames[peerLower] ? (
                           <input
@@ -1627,7 +1599,11 @@ function App() {
               )}
               <div className="chat__title">
                 {activePeerValid
-                  ? `${t.chatWithPrefix}${getDisplayName(activePeer)}`
+                  ? `${t.chatWithPrefix}${
+                      (profileNames[activePeerLower] ??
+                        peerNicknames[activePeerLower]) ||
+                      shorten(activePeer)
+                    }`
                   : t.chatTitle}
               </div>
               <div
