@@ -63,6 +63,7 @@ const dict = {
     typing: 'Typing…',
     settings: 'Settings',
     settingsTitle: 'Settings',
+    walletStatusLabel: 'Wallet',
     language: 'Language',
     docs: 'Docs',
     openDocs: 'Open docs',
@@ -101,6 +102,7 @@ const dict = {
     typing: '对方正在输入…',
     settings: '设置',
     settingsTitle: '设置',
+    walletStatusLabel: '钱包',
     language: '语言',
     docs: '文档',
     openDocs: '打开文档',
@@ -139,6 +141,7 @@ const dict = {
     typing: '입력 중…',
     settings: '설정',
     settingsTitle: '설정',
+    walletStatusLabel: '지갑',
     language: '언어',
     docs: '문서',
     openDocs: '문서 열기',
@@ -177,6 +180,7 @@ const dict = {
     typing: '入力中…',
     settings: '設定',
     settingsTitle: '設定',
+    walletStatusLabel: 'ウォレット',
     language: '言語',
     docs: 'ドキュメント',
     openDocs: 'ドキュメントを開く',
@@ -1569,9 +1573,6 @@ function App() {
         </div>
         <div className="wallet">
           <div className="wallet__top">
-            <div className={`pill ${connected ? 'pill--on' : 'pill--off'}`}>
-              {connected ? t.connected : t.notConnected}
-            </div>
             <button
               className="settings-btn"
               onClick={() => setSettingsOpen(true)}
@@ -1856,6 +1857,14 @@ function App() {
               >
                 Close
               </button>
+            </div>
+            <div className="settings__row">
+              <div>{t.walletStatusLabel}</div>
+              <div className="settings__actions">
+                <div className={`pill ${connected ? 'pill--on' : 'pill--off'}`}>
+                  {connected ? t.connected : t.notConnected}
+                </div>
+              </div>
             </div>
             <div className="settings__row">
               <div>{t.language}</div>
