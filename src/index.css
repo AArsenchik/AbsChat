@@ -23,13 +23,14 @@ body {
 body {
   margin: 0;
   min-width: 320px;
-  min-height: 100vh;
+  min-height: 100%;
   background-color: #050705;
   overflow: hidden;
+  overscroll-behavior: none;
 }
 
 #root {
-  min-height: 100vh;
+  min-height: 100%;
   height: 100%;
 }
 

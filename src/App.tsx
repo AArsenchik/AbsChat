@@ -461,17 +461,29 @@ function App() {
   useEffect(() => {
     const root = document.documentElement
     const updateHeight = () => {
-      const height = window.visualViewport?.height ?? window.innerHeight
-      root.style.setProperty('--app-height', `${height}px`)
+      const viewport = window.visualViewport
+      const height = viewport?.height ?? window.innerHeight
+      const offsetTop = viewport?.offsetTop ?? 0
+      root.style.setProperty('--app-height', `${height + offsetTop}px`)
+      root.style.setProperty('--app-offset-top', `${offsetTop}px`)
     }
-    updateHeight()
+    const updateHeightDelayed = () => {
+      updateHeight()
+      setTimeout(updateHeight, 60)
+      setTimeout(updateHeight, 250)
+    }
+    updateHeightDelayed()
     window.visualViewport?.addEventListener('resize', updateHeight)
     window.visualViewport?.addEventListener('scroll', updateHeight)
     window.addEventListener('resize', updateHeight)
+    window.addEventListener('focusin', updateHeightDelayed)
+    window.addEventListener('focusout', updateHeightDelayed)
     return () => {
       window.visualViewport?.removeEventListener('resize', updateHeight)
       window.visualViewport?.removeEventListener('scroll', updateHeight)
       window.removeEventListener('resize', updateHeight)
+      window.removeEventListener('focusin', updateHeightDelayed)
+      window.removeEventListener('focusout', updateHeightDelayed)
     }
   }, [])
 

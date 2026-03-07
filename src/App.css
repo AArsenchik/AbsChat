@@ -37,6 +37,7 @@ body {
   padding: 24px 32px 32px;
   overflow: hidden;
   box-sizing: border-box;
+  transform: translateY(var(--app-offset-top, 0px));
 }
 
 .ambient {
@@ -906,6 +907,9 @@ body {
 
 @media (max-width: 720px) {
   .app {
+    position: fixed;
+    inset: 0;
+    width: 100%;
     padding: 0;
     min-height: var(--app-height, 100dvh);
     height: var(--app-height, 100dvh);
