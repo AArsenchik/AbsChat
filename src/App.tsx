@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { useAbstractClient, useLoginWithAbstract, useCreateSession } from '@abstract-foundation/agw-react'
 import { useAccount, usePublicClient } from 'wagmi'
 import { fromHex, isAddress, toHex, parseEther, type Address } from 'viem'
@@ -29,6 +29,12 @@ type SupabaseMessage = {
   tx_hash: string
   created_at: string
   chain_id: number
+}
+
+type SupabaseProfile = {
+  address: string
+  display_name: string | null
+  avatar_url: string | null
 }
 
 const dict = {
@@ -63,6 +69,10 @@ const dict = {
     typing: 'Typing…',
     settings: 'Settings',
     settingsTitle: 'Settings',
+    profile: 'Profile',
+    profileTitle: 'Profile',
+    profileNamePlaceholder: 'Username',
+    profileCancel: 'Cancel',
     walletStatusLabel: 'Wallet',
     language: 'Language',
     docs: 'Docs',
@@ -102,6 +112,10 @@ const dict = {
     typing: '对方正在输入…',
     settings: '设置',
     settingsTitle: '设置',
+    profile: '个人资料',
+    profileTitle: '个人资料',
+    profileNamePlaceholder: '用户名',
+    profileCancel: '取消',
     walletStatusLabel: '钱包',
     language: '语言',
     docs: '文档',
@@ -141,6 +155,10 @@ const dict = {
     typing: '입력 중…',
     settings: '설정',
     settingsTitle: '설정',
+    profile: '프로필',
+    profileTitle: '프로필',
+    profileNamePlaceholder: '사용자 이름',
+    profileCancel: '취소',
     walletStatusLabel: '지갑',
     language: '언어',
     docs: '문서',
@@ -180,6 +198,10 @@ const dict = {
     typing: '入力中…',
     settings: '設定',
     settingsTitle: '設定',
+    profile: 'プロフィール',
+    profileTitle: 'プロフィール',
+    profileNamePlaceholder: 'ユーザー名',
+    profileCancel: 'キャンセル',
     walletStatusLabel: 'ウォレット',
     language: '言語',
     docs: 'ドキュメント',
@@ -197,7 +219,6 @@ type MessageListProps = {
   t: (typeof dict)[keyof typeof dict]
   readReceiptsByPeer: Record<string, string>
   profileNames: Record<string, string | null>
-  peerNicknames: Record<string, string>
   handleRemoveMessage: (id: string) => void
 }
 
@@ -208,7 +229,6 @@ const MessageList = memo(function MessageList({
   t,
   readReceiptsByPeer,
   profileNames,
-  peerNicknames,
   handleRemoveMessage,
 }: MessageListProps) {
   if (visibleMessages.length === 0) {
@@ -242,8 +262,7 @@ const MessageList = memo(function MessageList({
               <span className="message__sender">
                 {outgoing
                   ? t.you
-                  : (profileNames[message.from.toLowerCase()] ??
-                      peerNicknames[message.from.toLowerCase()]) ||
+                  : profileNames[message.from.toLowerCase()] ||
                     shorten(message.from)}
               </span>
               <span className="message__time">
@@ -304,6 +323,9 @@ const decoder = new TextDecoder()
 const ENCRYPTED_PREFIX = 'enc:v1:'
 const GIF_PREFIX = 'gif:'
 const GIF_FILES = ['ppp1.mp4', 'ppp2.mp4', 'ppp3.mp4'] as const
+const MAX_AVATAR_BYTES = 512 * 1024
+const AVATAR_MAX_SIDE = 256
+const AVATAR_QUALITY = 0.85
 
 const toBase64 = (bytes: Uint8Array) =>
   btoa(String.fromCharCode(...Array.from(bytes)))
@@ -311,6 +333,75 @@ const fromBase64 = (value: string) =>
   Uint8Array.from(atob(value), (char) => char.charCodeAt(0))
 
 const isEncryptedPayload = (payload: string) => payload.startsWith(ENCRYPTED_PREFIX)
+
+const getDataUrlBytes = (dataUrl: string) => {
+  const base64 = dataUrl.split(',')[1] ?? ''
+  return Math.ceil((base64.length * 3) / 4)
+}
+
+type LoadedImage = {
+  source: CanvasImageSource
+  width: number
+  height: number
+  cleanup?: () => void
+}
+
+const loadImageFromFile = (file: File) =>
+  new Promise<LoadedImage>(
+    (resolve, reject) => {
+      const img = new Image()
+      const url = URL.createObjectURL(file)
+      img.onload = () => {
+        URL.revokeObjectURL(url)
+        resolve({
+          source: img,
+          width: img.naturalWidth || img.width,
+          height: img.naturalHeight || img.height,
+          cleanup: undefined,
+        })
+      }
+      img.onerror = () => {
+        URL.revokeObjectURL(url)
+        reject(new Error('Image load failed'))
+      }
+      img.src = url
+    },
+  )
+
+const loadImageSource = async (file: File) => {
+  if (typeof createImageBitmap === 'function') {
+    try {
+      const bitmap = await createImageBitmap(file)
+      return {
+        source: bitmap,
+        width: bitmap.width,
+        height: bitmap.height,
+        cleanup: () => bitmap.close(),
+      }
+    } catch {
+      return loadImageFromFile(file)
+    }
+  }
+  return loadImageFromFile(file)
+}
+
+const compressAvatar = async (file: File) => {
+  const { source, width, height, cleanup } = await loadImageSource(file)
+  const scale = Math.min(1, AVATAR_MAX_SIDE / Math.max(width, height))
+  const targetWidth = Math.max(1, Math.round(width * scale))
+  const targetHeight = Math.max(1, Math.round(height * scale))
+  const canvas = document.createElement('canvas')
+  canvas.width = targetWidth
+  canvas.height = targetHeight
+  const ctx = canvas.getContext('2d')
+  if (!ctx) {
+    cleanup?.()
+    throw new Error('Canvas is not supported')
+  }
+  ctx.drawImage(source, 0, 0, targetWidth, targetHeight)
+  cleanup?.()
+  return canvas.toDataURL('image/jpeg', AVATAR_QUALITY)
+}
 
 const getConversationSalt = async (address: string, peer: string) => {
   const [a, b] = [address.toLowerCase(), peer.toLowerCase()].sort()
@@ -437,8 +528,9 @@ function App() {
   const [lastSyncBlock, setLastSyncBlock] = useState<string | null>(null)
   const lastScannedBlock = useRef<bigint | null>(null)
   const [isEditing, setIsEditing] = useState(false)
-  const [peerNicknames, setPeerNicknames] = useState<Record<string, string>>({})
   const [profileNames, setProfileNames] = useState<Record<string, string | null>>({})
+  const [customNames, setCustomNames] = useState<Record<string, string | null>>({})
+  const [customAvatars, setCustomAvatars] = useState<Record<string, string | null>>({})
   const [conversationKey, setConversationKey] = useState<CryptoKey | null>(null)
   const conversationKeyRef = useRef<CryptoKey | null>(null)
   const activePeerRef = useRef<string>('')
@@ -453,6 +545,12 @@ function App() {
   const signalsChannelRef = useRef<
     ReturnType<NonNullable<typeof supabase>['channel']> | null
   >(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [profileOpen, setProfileOpen] = useState(false)
+  const [profileEditing, setProfileEditing] = useState(false)
+  const [profileSaving, setProfileSaving] = useState(false)
+  const [profileNameDraft, setProfileNameDraft] = useState('')
+  const [profileError, setProfileError] = useState<string | null>(null)
 
   useEffect(() => {
     conversationKeyRef.current = conversationKey
@@ -659,6 +757,44 @@ function App() {
     }
   }, [peers, activePeer, activePeerValid])
 
+  useEffect(() => {
+    const supabaseClient = supabase
+    if (!supabaseClient) return
+    const targets = new Set<string>()
+    if (address) targets.add(address.toLowerCase())
+    peers.forEach((peer) => targets.add(peer.toLowerCase()))
+    if (activePeerValid) targets.add(activePeer.toLowerCase())
+    if (targets.size === 0) return
+    let cancelled = false
+    const load = async () => {
+      const list = Array.from(targets)
+      const { data } = await supabaseClient
+        .from('profiles')
+        .select('address, display_name, avatar_url')
+        .in('address', list)
+      if (cancelled || !data) return
+      const nameUpdates: Record<string, string | null> = {}
+      const avatarUpdates: Record<string, string | null> = {}
+      data.forEach((row) => {
+        const item = row as SupabaseProfile
+        if (!item?.address) return
+        const key = item.address.toLowerCase()
+        nameUpdates[key] = item.display_name ?? null
+        avatarUpdates[key] = item.avatar_url ?? null
+      })
+      if (Object.keys(nameUpdates).length > 0) {
+        setCustomNames((prev) => ({ ...prev, ...nameUpdates }))
+      }
+      if (Object.keys(avatarUpdates).length > 0) {
+        setCustomAvatars((prev) => ({ ...prev, ...avatarUpdates }))
+      }
+    }
+    load()
+    return () => {
+      cancelled = true
+    }
+  }, [peers, activePeer, activePeerValid, address])
+
   const unreadPeers = useMemo(() => {
     if (!address) return {}
     const own = address.toLowerCase()
@@ -709,8 +845,9 @@ function App() {
     if (!address) {
       setMessages([])
       lastScannedBlock.current = null
-      setPeerNicknames({})
       setProfileNames({})
+      setCustomNames({})
+      setCustomAvatars({})
       return
     }
     const key = `abstract-messenger:${address.toLowerCase()}`
@@ -719,15 +856,15 @@ function App() {
       if (!raw) {
         setMessages([])
         lastScannedBlock.current = null
-        setPeerNicknames({})
         setProfileNames({})
+        setCustomNames({})
+        setCustomAvatars({})
         setReadReceiptsByPeer({})
         return
       }
       const parsed = JSON.parse(raw) as {
         messages?: Message[]
         lastScannedBlock?: string
-        nicknames?: Record<string, string>
         profileNames?: Record<string, string | null>
         hiddenPeers?: string[]
         lastReadByPeer?: Record<string, string>
@@ -739,7 +876,6 @@ function App() {
         ) ?? []
       setMessages(normalized)
       setLastSyncBlock(parsed.lastScannedBlock ?? null)
-      setPeerNicknames(parsed.nicknames ?? {})
       setProfileNames(parsed.profileNames ?? {})
       setHiddenPeers(parsed.hiddenPeers ?? [])
       setLastReadByPeer(parsed.lastReadByPeer ?? {})
@@ -751,8 +887,9 @@ function App() {
       setMessages([])
       setLastSyncBlock(null)
       lastScannedBlock.current = null
-      setPeerNicknames({})
       setProfileNames({})
+      setCustomNames({})
+      setCustomAvatars({})
       setHiddenPeers([])
       setLastReadByPeer({})
       setReadReceiptsByPeer({})
@@ -872,14 +1009,13 @@ function App() {
     const payload = {
       messages,
       lastScannedBlock: lastSyncBlock ?? lastScannedBlock.current?.toString(),
-      nicknames: peerNicknames,
       profileNames,
       hiddenPeers,
       lastReadByPeer,
       readReceiptsByPeer,
     }
     localStorage.setItem(key, JSON.stringify(payload))
-  }, [address, lastSyncBlock, messages, peerNicknames, profileNames, hiddenPeers, lastReadByPeer, readReceiptsByPeer])
+  }, [address, lastSyncBlock, messages, profileNames, hiddenPeers, lastReadByPeer, readReceiptsByPeer])
 
   useEffect(() => {
     localStorage.setItem('lang', lang)
@@ -1330,13 +1466,6 @@ function App() {
     setHiddenPeers((prev) => [...prev, peer.toLowerCase()])
   }
 
-  const handleNicknameChange = (peer: string, nickname: string) => {
-    setPeerNicknames((prev) => ({
-      ...prev,
-      [peer.toLowerCase()]: nickname,
-    }))
-  }
-
   const handleSetPeer = () => {
     if (!peerInputValid) {
       setError('Enter a valid recipient address')
@@ -1533,6 +1662,121 @@ function App() {
     }, 5500)
   }
 
+  const displayNames = useMemo(
+    () => ({ ...profileNames, ...customNames }),
+    [profileNames, customNames],
+  )
+  const addressLower = address ? address.toLowerCase() : ''
+
+  const handleOpenProfile = () => {
+    setProfileOpen(true)
+    setProfileEditing(false)
+    setProfileError(null)
+    if (addressLower) {
+      setProfileNameDraft(displayNames[addressLower] ?? '')
+    } else {
+      setProfileNameDraft('')
+    }
+  }
+
+  const handleProfileCancel = () => {
+    setProfileEditing(false)
+    if (addressLower) {
+      setProfileNameDraft(displayNames[addressLower] ?? '')
+    } else {
+      setProfileNameDraft('')
+    }
+  }
+
+  const handleProfileSave = async () => {
+    if (!addressLower) return
+    const supabaseClient = supabase
+    if (!supabaseClient) {
+      setProfileError('Supabase is not configured')
+      return
+    }
+    setProfileError(null)
+    setProfileSaving(true)
+    const nextName = profileNameDraft.trim()
+    try {
+      const { error: upsertError } = await supabaseClient
+        .from('profiles')
+        .upsert(
+          [
+            {
+              address: addressLower,
+              display_name: nextName || null,
+              avatar_url: customAvatars[addressLower] ?? null,
+              updated_at: new Date().toISOString(),
+            },
+          ],
+          { onConflict: 'address' },
+        )
+      if (upsertError) {
+        throw upsertError
+      }
+      setCustomNames((prev) => ({ ...prev, [addressLower]: nextName || null }))
+      setProfileEditing(false)
+    } catch (err) {
+      setProfileError(getErrorMessage(err))
+    } finally {
+      setProfileSaving(false)
+    }
+  }
+
+  const handleAvatarPick = () => {
+    if (!addressLower) return
+    fileInputRef.current?.click()
+  }
+
+  const handleAvatarChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file || !addressLower) return
+    if (!file.type.startsWith('image/')) {
+      setProfileError('Please select an image file')
+      event.target.value = ''
+      return
+    }
+    setProfileError(null)
+    setProfileSaving(true)
+    compressAvatar(file)
+      .then(async (result) => {
+        if (getDataUrlBytes(result) > MAX_AVATAR_BYTES) {
+          setProfileError('Image is too large')
+          return
+        }
+        setCustomAvatars((prev) => ({ ...prev, [addressLower]: result }))
+        const supabaseClient = supabase
+        if (!supabaseClient) {
+          setProfileError('Supabase is not configured')
+          return
+        }
+        const { error: upsertError } = await supabaseClient
+          .from('profiles')
+          .upsert(
+            [
+              {
+                address: addressLower,
+                display_name: customNames[addressLower] ?? null,
+                avatar_url: result,
+                updated_at: new Date().toISOString(),
+              },
+            ],
+            { onConflict: 'address' },
+          )
+        if (upsertError) {
+          throw upsertError
+        }
+      })
+      .catch((err) => {
+        setProfileError(getErrorMessage(err))
+      })
+      .finally(() => {
+        setProfileSaving(false)
+      })
+    event.target.value = ''
+  }
+
   const activePeerLower = activePeerValid ? activePeer.toLowerCase() : ''
   const lastOnlineAt = activePeerLower ? onlinePeers[activePeerLower] : undefined
   const isPeerOnline =
@@ -1580,6 +1824,23 @@ function App() {
               title={t.settings}
             >
               <span className="settings-btn__icon">⚙️</span>
+            </button>
+            <button
+              className="settings-btn"
+              onClick={handleOpenProfile}
+              aria-label={t.profile}
+              title={t.profile}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" className="settings-btn__svg">
+                <circle cx="12" cy="8" r="4" fill="none" stroke="currentColor" strokeWidth="1.6" />
+                <path
+                  d="M4 20c0-4.2 3.6-7 8-7s8 2.8 8 7"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                />
+              </svg>
             </button>
             {connected ? (
               <button className="btn btn--ghost" onClick={logout}>
@@ -1708,22 +1969,16 @@ function App() {
                       <div className="peer__unread">!</div>
                     )}
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px', width: '100%', overflow: 'hidden' }}>
-                      <AbstractProfile address={peer} size="md" />
+                      <AbstractProfile
+                        address={peer}
+                        size="md"
+                        src={customAvatars[peerLower] ?? undefined}
+                      />
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', overflow: 'hidden', flex: 1, minWidth: 0 }}>
                         <span className="peer__address" style={{ width: '100%' }}>
-                          {(profileNames[peerLower] ?? peerNicknames[peerLower]) || shorten(peer)}
+                          {displayNames[peerLower] || shorten(peer)}
                         </span>
-                        {isEditing && !profileNames[peerLower] ? (
-                          <input
-                            className="peer__input"
-                            placeholder="Nickname"
-                            value={peerNicknames[peerLower] || ''}
-                            onChange={(e) => handleNicknameChange(peer, e.target.value)}
-                            onClick={(e) => e.stopPropagation()}
-                          />
-                        ) : (
-                          <span className="peer__full" style={{ width: '100%' }}>{peer}</span>
-                        )}
+                        <span className="peer__full" style={{ width: '100%' }}>{peer}</span>
                       </div>
                     </div>
                   </button>
@@ -1757,14 +2012,16 @@ function App() {
             <div className="chat__left">
               {activePeerValid && (
                 <div className="chat__avatar">
-                  <AbstractProfile address={activePeer} size="md" />
+                  <AbstractProfile
+                    address={activePeer}
+                    size="md"
+                    src={customAvatars[activePeerLower] ?? undefined}
+                  />
                 </div>
               )}
               <div className="chat__title">
                 {activePeerValid
-                  ? (profileNames[activePeerLower] ??
-                      peerNicknames[activePeerLower]) ||
-                    shorten(activePeer)
+                  ? displayNames[activePeerLower] || shorten(activePeer)
                   : t.chatTitle}
               </div>
               <div
@@ -1795,8 +2052,7 @@ function App() {
               activePeer={activePeer}
               t={t}
               readReceiptsByPeer={readReceiptsByPeer}
-              profileNames={profileNames}
-              peerNicknames={peerNicknames}
+              profileNames={displayNames}
               handleRemoveMessage={handleRemoveMessage}
             />
           </div>
@@ -1843,6 +2099,76 @@ function App() {
           {error && <div className="error">{error}</div>}
         </section>
       </main>
+      {profileOpen && (
+        <div className="modal">
+          <div className="modal__overlay" onClick={() => setProfileOpen(false)} />
+          <div className="modal__content">
+            <div className="modal__header">
+              <div className="modal__title">{t.profileTitle}</div>
+              <button
+                className="btn btn--ghost settings__control settings__control--sm modal__close modal__close--plain"
+                onClick={() => setProfileOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+            <div className="profile">
+              <button className="profile__avatar" onClick={handleAvatarPick}>
+                <AbstractProfile
+                  address={address}
+                  size="xl"
+                  showTooltip={false}
+                  src={addressLower ? customAvatars[addressLower] ?? undefined : undefined}
+                />
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="profile__file"
+                onChange={handleAvatarChange}
+              />
+              <div className="profile__row">
+                <div className="profile__address">{address ?? '—'}</div>
+                <button
+                  className="btn btn--ghost settings__control settings__control--sm"
+                  onClick={() => setProfileEditing(true)}
+                  disabled={!address}
+                >
+                  {t.edit}
+                </button>
+              </div>
+              {profileEditing && (
+                <div className="profile__edit">
+                  <input
+                    className="input profile__input"
+                    placeholder={t.profileNamePlaceholder}
+                    value={profileNameDraft}
+                    onChange={(event) => setProfileNameDraft(event.target.value)}
+                  />
+                  <div className="profile__actions">
+                    <button
+                      className="btn settings__control"
+                      onClick={handleProfileSave}
+                      disabled={profileSaving || !address}
+                    >
+                      {profileSaving ? t.signing : t.save}
+                    </button>
+                    <button
+                      className="btn btn--ghost settings__control"
+                      onClick={handleProfileCancel}
+                      disabled={profileSaving}
+                    >
+                      {t.profileCancel}
+                    </button>
+                  </div>
+                </div>
+              )}
+              {profileError && <div className="error">{profileError}</div>}
+            </div>
+          </div>
+        </div>
+      )}
       {settingsOpen && (
         <div className="modal">
           <div className="modal__overlay" onClick={() => setSettingsOpen(false)} />

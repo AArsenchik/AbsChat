@@ -118,6 +118,11 @@ html, body {
   line-height: 1;
 }
 
+.settings-btn__svg {
+  width: 18px;
+  height: 18px;
+}
+
 .settings-btn:hover {
   transform: translateY(-1px);
   box-shadow: 0 4px 12px rgba(20, 200, 110, 0.2);
@@ -178,6 +183,60 @@ html, body {
 .modal__close--plain:hover {
   transform: none;
   box-shadow: none;
+}
+
+.profile {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.profile__avatar {
+  align-self: center;
+  width: 120px;
+  height: 120px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.profile__file {
+  display: none;
+}
+
+.profile__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  background: var(--surface);
+}
+
+.profile__address {
+  font-size: 13px;
+  color: var(--text);
+  word-break: break-all;
+}
+
+.profile__edit {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.profile__input {
+  width: 100%;
+}
+
+.profile__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .settings__row {

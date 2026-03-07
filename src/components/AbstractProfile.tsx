@@ -3,11 +3,12 @@ import { useAccount } from 'wagmi'
 
 interface AbstractProfileProps {
   address?: string
-  size?: 'sm' | 'md' | 'lg'
+  size?: 'sm' | 'md' | 'lg' | 'xl'
   className?: string
   showTooltip?: boolean
   fallback?: string
   shineColor?: string
+  src?: string | null
 }
 
 const avatarCache = new Map<string, { value: string | null; ts: number }>()
@@ -49,7 +50,8 @@ export function AbstractProfile({
   className = '',
   showTooltip = true,
   fallback,
-  shineColor
+  shineColor,
+  src
 }: AbstractProfileProps) {
   const { address: connectedAddress } = useAccount()
   const [, setCacheVersion] = useState(0)
@@ -59,12 +61,13 @@ export function AbstractProfile({
     sm: { width: '24px', height: '24px' },
     md: { width: '40px', height: '40px' },
     lg: { width: '64px', height: '64px' },
+    xl: { width: '120px', height: '120px' },
   }
 
   const resolvedAddress = (address ?? connectedAddress ?? '').toString()
   const normalizedAddress = resolvedAddress.trim().toLowerCase()
   const cachedEntry = normalizedAddress ? avatarCache.get(normalizedAddress) : null
-  const remoteSrc = cachedEntry?.value ?? null
+  const remoteSrc = src ?? cachedEntry?.value ?? null
   const fallbackStage = normalizedAddress ? (fallbackStages[normalizedAddress] ?? 0) : 0
   const currentSrc =
     fallbackStage === 2
@@ -81,7 +84,7 @@ export function AbstractProfile({
   const backgroundColor = shineColor ? 'transparent' : 'rgba(30, 240, 140, 0.1)'
 
   useEffect(() => {
-    if (!normalizedAddress) {
+    if (!normalizedAddress || src) {
       return
     }
     const cached = avatarCache.get(normalizedAddress)
@@ -125,7 +128,7 @@ export function AbstractProfile({
       isActive = false
       controller.abort()
     }
-  }, [normalizedAddress])
+  }, [normalizedAddress, src])
 
   return (
     <div 
