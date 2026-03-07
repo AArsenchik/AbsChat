@@ -1047,7 +1047,7 @@ body {
   }
 
   .panel--chat {
-    padding-bottom: calc(12px + env(safe-area-inset-bottom) + var(--keyboard-height, 0px));
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
     display: flex;
     flex-direction: column;
     min-height: 0;
@@ -1081,10 +1081,12 @@ body {
   .chat__composer {
     gap: 8px;
     position: sticky;
-    bottom: 0;
+    bottom: env(safe-area-inset-bottom);
     z-index: 5;
     background: var(--surface);
-    padding: 8px 0 calc(8px + env(safe-area-inset-bottom) + var(--keyboard-height, 0px));
+    padding: 8px 0 calc(8px + env(safe-area-inset-bottom));
+    transform: translateY(calc(-1 * var(--keyboard-height, 0px)));
+    will-change: transform;
   }
 
   .textarea--composer {

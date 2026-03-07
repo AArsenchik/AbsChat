@@ -1834,7 +1834,7 @@ function App() {
             >
               <svg className="btn__icon" viewBox="0 0 24 24" aria-hidden="true">
                 <path
-                  d="M3 12l17-8-6 8 6 8-17-8z"
+                  d="M21 12l-17-8 6 8-6 8 17-8z"
                   fill="currentColor"
                 />
               </svg>
