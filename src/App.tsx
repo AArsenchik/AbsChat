@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAbstractClient, useLoginWithAbstract, useCreateSession } from '@abstract-foundation/agw-react'
 import { useAccount, usePublicClient } from 'wagmi'
 import { fromHex, isAddress, toHex, parseEther, type Address } from 'viem'
@@ -33,7 +33,7 @@ type SupabaseMessage = {
 
 const dict = {
   en: {
-    brandTitle: 'Abstract Secret Chatting',
+    brandTitle: 'AbsChat',
     connected: 'Connected',
     notConnected: 'Not connected',
     signOut: 'Sign out',
@@ -71,7 +71,7 @@ const dict = {
     revokeSession: 'Revoke session',
   },
   zh: {
-    brandTitle: '抽象密聊',
+    brandTitle: 'AbsChat',
     connected: '已连接',
     notConnected: '未连接',
     signOut: '退出',
@@ -109,7 +109,7 @@ const dict = {
     revokeSession: '撤销会话',
   },
   ko: {
-    brandTitle: '추상 비밀 채팅',
+    brandTitle: 'AbsChat',
     connected: '연결됨',
     notConnected: '연결 안 됨',
     signOut: '로그아웃',
@@ -147,7 +147,7 @@ const dict = {
     revokeSession: '세션 취소',
   },
   ja: {
-    brandTitle: '抽象シークレットチャット',
+    brandTitle: 'AbsChat',
     connected: '接続済み',
     notConnected: '未接続',
     signOut: 'サインアウト',
@@ -185,6 +185,95 @@ const dict = {
     revokeSession: 'セッションを取り消す',
   },
 }
+
+type MessageListProps = {
+  visibleMessages: Message[]
+  address: Address | undefined
+  activePeer: string
+  t: (typeof dict)[keyof typeof dict]
+  readReceiptsByPeer: Record<string, string>
+  profileNames: Record<string, string | null>
+  peerNicknames: Record<string, string>
+  handleRemoveMessage: (id: string) => void
+}
+
+const MessageList = memo(function MessageList({
+  visibleMessages,
+  address,
+  activePeer,
+  t,
+  readReceiptsByPeer,
+  profileNames,
+  peerNicknames,
+  handleRemoveMessage,
+}: MessageListProps) {
+  if (visibleMessages.length === 0) {
+    return <div className="chat__empty">{t.chatEmpty}</div>
+  }
+
+  return (
+    <>
+      {visibleMessages.map((message) => {
+        const outgoing =
+          address && message.from.toLowerCase() === address.toLowerCase()
+        const peerLower = activePeer.toLowerCase()
+        const readAt = readReceiptsByPeer[peerLower]
+        const isRead = outgoing && readAt ? message.createdAt <= readAt : false
+        const gifSrc = getGifSrc(message.text)
+        return (
+          <div
+            key={message.id}
+            className={`message ${outgoing ? 'message--out' : 'message--in'}`}
+          >
+            {message.status === 'failed' && (
+              <button
+                className="message__remove"
+                onClick={() => handleRemoveMessage(message.id)}
+                title="Remove"
+              >
+                ✕
+              </button>
+            )}
+            <div className="message__meta">
+              <span className="message__sender">
+                {outgoing
+                  ? t.you
+                  : (profileNames[message.from.toLowerCase()] ??
+                      peerNicknames[message.from.toLowerCase()]) ||
+                    shorten(message.from)}
+              </span>
+              <span className="message__time">
+                {formatTime(message.createdAt)}
+              </span>
+            </div>
+            <div className="message__text">
+              {gifSrc ? (
+                <video
+                  className="message__gif"
+                  autoPlay
+                  loop
+                  muted
+                  playsInline
+                  preload="metadata"
+                >
+                  <source src={gifSrc} type="video/mp4" />
+                </video>
+              ) : (
+                message.text
+              )}
+            </div>
+            <div className="message__tx">
+              {message.status === 'pending' && t.awaitSig}
+              {message.status === 'sent' &&
+                (isRead ? t.seen : `${t.txPrefix}${shorten(message.txHash)}`)}
+              {message.status === 'failed' && t.sigFailed}
+            </div>
+          </div>
+        )
+      })}
+    </>
+  )
+})
 
 const profileNameCache = new Map<string, { value: string | null; ts: number }>()
 const PROFILE_CACHE_TTL = 5 * 60 * 1000
@@ -368,6 +457,23 @@ function App() {
   useEffect(() => {
     activePeerRef.current = activePeer ? activePeer.toLowerCase() : ''
   }, [activePeer])
+
+  useEffect(() => {
+    const root = document.documentElement
+    const updateHeight = () => {
+      const height = window.visualViewport?.height ?? window.innerHeight
+      root.style.setProperty('--app-height', `${height}px`)
+    }
+    updateHeight()
+    window.visualViewport?.addEventListener('resize', updateHeight)
+    window.visualViewport?.addEventListener('scroll', updateHeight)
+    window.addEventListener('resize', updateHeight)
+    return () => {
+      window.visualViewport?.removeEventListener('resize', updateHeight)
+      window.visualViewport?.removeEventListener('scroll', updateHeight)
+      window.removeEventListener('resize', updateHeight)
+    }
+  }, [])
 
   const [hiddenPeers, setHiddenPeers] = useState<string[]>([])
   
@@ -1145,7 +1251,7 @@ function App() {
   const emitTyping = (typing: boolean) => {
     if (!signalsChannelRef.current || !address || !activePeerValid) return
     const now = Date.now()
-    if (typing && now - lastTypingSentRef.current < 800) return
+    if (typing && now - lastTypingSentRef.current < 1500) return
     if (typing) lastTypingSentRef.current = now
     signalsChannelRef.current.send({
       type: 'broadcast',
@@ -1394,9 +1500,9 @@ function App() {
     setEmojiOpen(false)
   }
 
-  const handleRemoveMessage = (id: string) => {
+  const handleRemoveMessage = useCallback((id: string) => {
     setMessages((prev) => prev.filter((m) => m.id !== id))
-  }
+  }, [])
 
   const handleTypingChange = (value: string) => {
     setMessageText(value)
@@ -1670,76 +1776,16 @@ function App() {
           </div>
 
           <div className="chat__body" ref={chatBodyRef} onScroll={handleChatScroll}>
-            {visibleMessages.length === 0 ? (
-              <div className="chat__empty">
-                {t.chatEmpty}
-              </div>
-            ) : (
-              visibleMessages.map((message) => {
-                const outgoing =
-                  address &&
-                  message.from.toLowerCase() === address.toLowerCase()
-                const peerLower = activePeer.toLowerCase()
-                const readAt = readReceiptsByPeer[peerLower]
-                const isRead =
-                  outgoing && readAt ? message.createdAt <= readAt : false
-                const gifSrc = getGifSrc(message.text)
-                return (
-                  <div
-                    key={message.id}
-                    className={`message ${
-                      outgoing ? 'message--out' : 'message--in'
-                    }`}
-                  >
-                    {message.status === 'failed' && (
-                      <button
-                        className="message__remove"
-                        onClick={() => handleRemoveMessage(message.id)}
-                        title="Remove"
-                      >
-                        ✕
-                      </button>
-                    )}
-                    <div className="message__meta">
-                      <span className="message__sender">
-                        {outgoing
-                          ? t.you
-                          : (profileNames[message.from.toLowerCase()] ??
-                              peerNicknames[message.from.toLowerCase()]) ||
-                            shorten(message.from)}
-                      </span>
-                      <span className="message__time">
-                        {formatTime(message.createdAt)}
-                      </span>
-                    </div>
-                    <div className="message__text">
-                      {gifSrc ? (
-                        <video
-                          className="message__gif"
-                          autoPlay
-                          loop
-                          muted
-                          playsInline
-                          preload="metadata"
-                        >
-                          <source src={gifSrc} type="video/mp4" />
-                        </video>
-                      ) : (
-                        message.text
-                      )}
-                    </div>
-                    <div className="message__tx">
-                      {message.status === 'pending' && t.awaitSig}
-                      {message.status === 'sent' &&
-                        (isRead
-                          ? t.seen
-                          : `${t.txPrefix}${shorten(message.txHash)}`)}
-                      {message.status === 'failed' && t.sigFailed}
-                    </div>
-                  </div>
-                )
-              })
-            )}
+            <MessageList
+              visibleMessages={visibleMessages}
+              address={address}
+              activePeer={activePeer}
+              t={t}
+              readReceiptsByPeer={readReceiptsByPeer}
+              profileNames={profileNames}
+              peerNicknames={peerNicknames}
+              handleRemoveMessage={handleRemoveMessage}
+            />
           </div>
 
           <div className="chat__composer">
