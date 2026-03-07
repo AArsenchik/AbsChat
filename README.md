@@ -30,6 +30,24 @@ for select using (true);
 
 create policy "public insert" on public.messages
 for insert with check (true);
+
+create table if not exists public.profiles (
+  address text primary key not null,
+  display_name text,
+  avatar_url text,
+  updated_at timestamptz
+);
+
+alter table public.profiles enable row level security;
+
+create policy "public read profiles" on public.profiles
+for select using (true);
+
+create policy "public insert profiles" on public.profiles
+for insert with check (true);
+
+create policy "public update profiles" on public.profiles
+for update using (true);
 ```
 
 # React + TypeScript + Vite

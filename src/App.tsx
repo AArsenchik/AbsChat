@@ -760,22 +760,20 @@ function App() {
     }
   }, [peers, activePeer, activePeerValid])
 
-  useEffect(() => {
-    const supabaseClient = supabase
-    if (!supabaseClient) return
-    const targets = new Set<string>()
-    if (address) targets.add(address.toLowerCase())
-    peers.forEach((peer) => targets.add(peer.toLowerCase()))
-    if (activePeerValid) targets.add(activePeer.toLowerCase())
-    if (targets.size === 0) return
-    let cancelled = false
-    const load = async () => {
-      const list = Array.from(targets)
-      const { data } = await supabaseClient
+  const loadProfiles = useCallback(
+    async (addresses: string[]) => {
+      const supabaseClient = supabase
+      if (!supabaseClient || addresses.length === 0) return
+      const { data, error } = await supabaseClient
         .from('profiles')
         .select('address, display_name, avatar_url')
-        .in('address', list)
-      if (cancelled || !data) return
+        .in('address', addresses)
+      if (error) {
+        console.error('Profile load error:', error)
+        setProfileError(getErrorMessage(error))
+        return
+      }
+      if (!data) return
       const nameUpdates: Record<string, string | null> = {}
       const avatarUpdates: Record<string, string | null> = {}
       data.forEach((row) => {
@@ -791,12 +789,18 @@ function App() {
       if (Object.keys(avatarUpdates).length > 0) {
         setCustomAvatars((prev) => ({ ...prev, ...avatarUpdates }))
       }
-    }
-    load()
-    return () => {
-      cancelled = true
-    }
-  }, [peers, activePeer, activePeerValid, address])
+    },
+    [setCustomNames, setCustomAvatars],
+  )
+
+  useEffect(() => {
+    const targets = new Set<string>()
+    if (address) targets.add(address.toLowerCase())
+    peers.forEach((peer) => targets.add(peer.toLowerCase()))
+    if (activePeerValid) targets.add(activePeer.toLowerCase())
+    const list = Array.from(targets)
+    void loadProfiles(list)
+  }, [peers, activePeer, activePeerValid, address, loadProfiles])
 
   const unreadPeers = useMemo(() => {
     if (!address) return {}
@@ -1670,6 +1674,10 @@ function App() {
     [profileNames, customNames],
   )
   const addressLower = address ? address.toLowerCase() : ''
+  const profileLabel =
+    addressLower && displayNames[addressLower]
+      ? displayNames[addressLower]
+      : address ?? '—'
 
   const handleOpenProfile = () => {
     setProfileOpen(true)
@@ -1719,6 +1727,8 @@ function App() {
         throw upsertError
       }
       setCustomNames((prev) => ({ ...prev, [addressLower]: nextName || null }))
+      setProfileNameDraft(nextName)
+      await loadProfiles([addressLower])
       setProfileEditing(false)
     } catch (err) {
       console.error('Profile save error:', err)
@@ -1771,6 +1781,7 @@ function App() {
         if (upsertError) {
           throw upsertError
         }
+        await loadProfiles([addressLower])
       })
       .catch((err) => {
         console.error('Avatar save error:', err)
@@ -2139,7 +2150,7 @@ function App() {
                 onChange={handleAvatarChange}
               />
               <div className="profile__row">
-                <div className="profile__address">{address ?? '—'}</div>
+                <div className="profile__address">{profileLabel}</div>
                 <button
                   className="btn btn--ghost settings__control settings__control--sm"
                   onClick={() => setProfileEditing(true)}
