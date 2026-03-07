@@ -315,6 +315,9 @@ const formatTime = (value: string) =>
 const getErrorMessage = (error: unknown) => {
   if (error instanceof Error) return error.message
   if (typeof error === 'string') return error
+  if (typeof error === 'object' && error !== null && 'message' in error) {
+    return String((error as { message: unknown }).message)
+  }
   return 'Unknown error'
 }
 
@@ -1718,6 +1721,7 @@ function App() {
       setCustomNames((prev) => ({ ...prev, [addressLower]: nextName || null }))
       setProfileEditing(false)
     } catch (err) {
+      console.error('Profile save error:', err)
       setProfileError(getErrorMessage(err))
     } finally {
       setProfileSaving(false)
@@ -1769,6 +1773,7 @@ function App() {
         }
       })
       .catch((err) => {
+        console.error('Avatar save error:', err)
         setProfileError(getErrorMessage(err))
       })
       .finally(() => {
@@ -2113,7 +2118,12 @@ function App() {
               </button>
             </div>
             <div className="profile">
-              <button className="profile__avatar" onClick={handleAvatarPick}>
+              <button
+                className={`profile__avatar ${profileEditing ? 'editing' : ''}`}
+                onClick={handleAvatarPick}
+                disabled={!profileEditing}
+                title={profileEditing ? "Change avatar" : undefined}
+              >
                 <AbstractProfile
                   address={address}
                   size="xl"
@@ -2152,7 +2162,7 @@ function App() {
                       onClick={handleProfileSave}
                       disabled={profileSaving || !address}
                     >
-                      {profileSaving ? t.signing : t.save}
+                      {profileSaving ? 'Saving...' : t.save}
                     </button>
                     <button
                       className="btn btn--ghost settings__control"
