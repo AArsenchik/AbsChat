@@ -1762,11 +1762,9 @@ function App() {
               )}
               <div className="chat__title">
                 {activePeerValid
-                  ? `${t.chatWithPrefix}${
-                      (profileNames[activePeerLower] ??
-                        peerNicknames[activePeerLower]) ||
-                      shorten(activePeer)
-                    }`
+                  ? (profileNames[activePeerLower] ??
+                      peerNicknames[activePeerLower]) ||
+                    shorten(activePeer)
                   : t.chatTitle}
               </div>
               <div
