@@ -321,6 +321,14 @@ const getErrorMessage = (error: unknown) => {
   return 'Unknown error'
 }
 
+const isAbortError = (error: unknown) => {
+  if (error instanceof DOMException && error.name === 'AbortError') return true
+  const message = getErrorMessage(error).toLowerCase()
+  return message.includes('abort') || message.includes('aborted')
+}
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
 const ENCRYPTED_PREFIX = 'enc:v1:'
@@ -790,6 +798,41 @@ function App() {
       }
     },
     [setCustomNames, setCustomAvatars],
+  )
+
+  const saveProfile = useCallback(
+    async (payload: {
+      address: string
+      display_name: string | null
+      avatar_url: string | null
+      updated_at: string
+    }) => {
+      const supabaseClient = supabase
+      if (!supabaseClient) {
+        throw new Error('Supabase is not configured')
+      }
+      const attempt = async () => {
+        const { data, error } = await supabaseClient
+          .from('profiles')
+          .upsert([payload], { onConflict: 'address' })
+          .select('address, display_name, avatar_url')
+        if (error) {
+          throw error
+        }
+        const row = Array.isArray(data) ? (data[0] as SupabaseProfile) : null
+        return row ?? null
+      }
+      try {
+        return await attempt()
+      } catch (err) {
+        if (isAbortError(err)) {
+          await wait(300)
+          return await attempt()
+        }
+        throw err
+      }
+    },
+    [],
   )
 
   useEffect(() => {
@@ -1716,38 +1759,38 @@ function App() {
 
   const handleProfileSave = async () => {
     if (!addressLower) return
-    const supabaseClient = supabase
-    if (!supabaseClient) {
-      setProfileError('Supabase is not configured')
-      return
-    }
     setProfileError(null)
     setProfileSaving(true)
     const nextName = profileNameDraft.trim()
     try {
-      const { error: upsertError } = await supabaseClient
-        .from('profiles')
-        .upsert(
-          [
-            {
-              address: addressLower,
-              display_name: nextName || null,
-              avatar_url: customAvatars[addressLower] ?? null,
-              updated_at: new Date().toISOString(),
-            },
-          ],
-          { onConflict: 'address' },
-        )
-      if (upsertError) {
-        throw upsertError
+      const row = await saveProfile({
+        address: addressLower,
+        display_name: nextName || null,
+        avatar_url: customAvatars[addressLower] ?? null,
+        updated_at: new Date().toISOString(),
+      })
+      if (row) {
+        setCustomNames((prev) => ({
+          ...prev,
+          [addressLower]: row.display_name ?? null,
+        }))
+        if (row.avatar_url) {
+          setCustomAvatars((prev) => ({
+            ...prev,
+            [addressLower]: row.avatar_url ?? null,
+          }))
+        }
+      } else {
+        setCustomNames((prev) => ({ ...prev, [addressLower]: nextName || null }))
+        await loadProfiles([addressLower])
       }
-      setCustomNames((prev) => ({ ...prev, [addressLower]: nextName || null }))
       setProfileNameDraft(nextName)
-      await loadProfiles([addressLower])
       setProfileEditing(false)
     } catch (err) {
       console.error('Profile save error:', err)
-      setProfileError(getErrorMessage(err))
+      if (!isAbortError(err)) {
+        setProfileError(getErrorMessage(err))
+      }
     } finally {
       setProfileSaving(false)
     }
@@ -1775,32 +1818,30 @@ function App() {
           return
         }
         setCustomAvatars((prev) => ({ ...prev, [addressLower]: result }))
-        const supabaseClient = supabase
-        if (!supabaseClient) {
-          setProfileError('Supabase is not configured')
-          return
+        const row = await saveProfile({
+          address: addressLower,
+          display_name: customNames[addressLower] ?? null,
+          avatar_url: result,
+          updated_at: new Date().toISOString(),
+        })
+        if (row) {
+          setCustomNames((prev) => ({
+            ...prev,
+            [addressLower]: row.display_name ?? null,
+          }))
+          setCustomAvatars((prev) => ({
+            ...prev,
+            [addressLower]: row.avatar_url ?? null,
+          }))
+        } else {
+          await loadProfiles([addressLower])
         }
-        const { error: upsertError } = await supabaseClient
-          .from('profiles')
-          .upsert(
-            [
-              {
-                address: addressLower,
-                display_name: customNames[addressLower] ?? null,
-                avatar_url: result,
-                updated_at: new Date().toISOString(),
-              },
-            ],
-            { onConflict: 'address' },
-          )
-        if (upsertError) {
-          throw upsertError
-        }
-        await loadProfiles([addressLower])
       })
       .catch((err) => {
         console.error('Avatar save error:', err)
-        setProfileError(getErrorMessage(err))
+        if (!isAbortError(err)) {
+          setProfileError(getErrorMessage(err))
+        }
       })
       .finally(() => {
         setProfileSaving(false)
