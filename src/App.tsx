@@ -770,7 +770,6 @@ function App() {
         .in('address', addresses)
       if (error) {
         console.error('Profile load error:', error)
-        setProfileError(getErrorMessage(error))
         return
       }
       if (!data) return
@@ -873,6 +872,8 @@ function App() {
         messages?: Message[]
         lastScannedBlock?: string
         profileNames?: Record<string, string | null>
+        customNames?: Record<string, string | null>
+        customAvatars?: Record<string, string | null>
         hiddenPeers?: string[]
         lastReadByPeer?: Record<string, string>
         readReceiptsByPeer?: Record<string, string>
@@ -884,6 +885,8 @@ function App() {
       setMessages(normalized)
       setLastSyncBlock(parsed.lastScannedBlock ?? null)
       setProfileNames(parsed.profileNames ?? {})
+      setCustomNames(parsed.customNames ?? {})
+      setCustomAvatars(parsed.customAvatars ?? {})
       setHiddenPeers(parsed.hiddenPeers ?? [])
       setLastReadByPeer(parsed.lastReadByPeer ?? {})
       setReadReceiptsByPeer(parsed.readReceiptsByPeer ?? {})
@@ -1017,12 +1020,24 @@ function App() {
       messages,
       lastScannedBlock: lastSyncBlock ?? lastScannedBlock.current?.toString(),
       profileNames,
+      customNames,
+      customAvatars,
       hiddenPeers,
       lastReadByPeer,
       readReceiptsByPeer,
     }
     localStorage.setItem(key, JSON.stringify(payload))
-  }, [address, lastSyncBlock, messages, profileNames, hiddenPeers, lastReadByPeer, readReceiptsByPeer])
+  }, [
+    address,
+    lastSyncBlock,
+    messages,
+    profileNames,
+    customNames,
+    customAvatars,
+    hiddenPeers,
+    lastReadByPeer,
+    readReceiptsByPeer,
+  ])
 
   useEffect(() => {
     localStorage.setItem('lang', lang)
@@ -2153,7 +2168,10 @@ function App() {
                 <div className="profile__address">{profileLabel}</div>
                 <button
                   className="btn btn--ghost settings__control settings__control--sm"
-                  onClick={() => setProfileEditing(true)}
+                  onClick={() => {
+                    setProfileEditing(true)
+                    setProfileError(null)
+                  }}
                   disabled={!address}
                 >
                   {t.edit}
