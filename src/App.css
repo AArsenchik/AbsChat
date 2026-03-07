@@ -628,6 +628,9 @@ body {
   font-size: 18px;
   font-weight: 600;
   margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .chat__typing {
@@ -904,6 +907,7 @@ body {
   .app {
     padding: 0;
     min-height: 100dvh;
+    height: 100dvh;
   }
 
   .app__header {
@@ -953,6 +957,8 @@ body {
 
   .app__main {
     gap: 16px;
+    flex: 1;
+    min-height: 0;
   }
 
   .panel {
@@ -964,13 +970,22 @@ body {
   }
 
   .address {
-    flex-direction: column;
+    flex-direction: row;
+    align-items: center;
   }
 
-  .address .btn:not(.btn--icon),
-  .address .btn--ghost:not(.btn--icon) {
-    width: 100%;
-    justify-content: center;
+  .input--address {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .address .btn--open,
+  .address .btn--icon {
+    flex: 0 0 auto;
+  }
+
+  .input--address {
+    height: 40px;
   }
 
   .chat__header {
@@ -1003,8 +1018,9 @@ body {
   }
 
   .chat__right {
-    width: 100%;
-    justify-content: flex-start;
+    margin-left: auto;
+    width: auto;
+    justify-content: flex-end;
   }
 
   .panel__hint {
@@ -1028,8 +1044,10 @@ body {
   }
 
   .chat__left {
-    grid-template-columns: auto 1fr;
-    grid-template-rows: auto auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
   }
 
   .chat__title {
@@ -1044,11 +1062,33 @@ body {
     height: 40px;
     min-height: 40px;
     max-height: 40px;
+    font-size: 16px;
   }
 
   .emoji-btn,
   .btn--composer {
     height: 40px;
+  }
+
+  .btn--icon,
+  .btn--open {
+    width: 40px;
+    height: 40px;
+    padding: 0;
+  }
+
+  .input,
+  .textarea {
+    font-size: 16px;
+  }
+
+  .message__gif {
+    width: 160px;
+    height: 160px;
+  }
+
+  .emoji-modal__video {
+    aspect-ratio: 1 / 1;
   }
 
   .message {

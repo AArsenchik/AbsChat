@@ -1490,11 +1490,29 @@ function App() {
               }}
             />
             <button
-              className="btn btn--open"
+              className="btn btn--icon btn--open"
               onClick={handleSetPeer}
               disabled={!peerInputValid}
+              aria-label={t.open}
+              title={t.open}
             >
-              {t.open}
+              <svg className="btn__icon" viewBox="0 0 24 24" aria-hidden="true">
+                <circle
+                  cx="11"
+                  cy="11"
+                  r="6.5"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                />
+                <path
+                  d="M16.2 16.2l4 4"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                />
+              </svg>
             </button>
             <button
               className="btn btn--icon"
@@ -1703,7 +1721,6 @@ function App() {
                           muted
                           playsInline
                           preload="metadata"
-                          poster="/bpengu.png"
                         >
                           <source src={gifSrc} type="video/mp4" />
                         </video>
@@ -1848,7 +1865,6 @@ function App() {
                   muted
                   playsInline
                   preload="metadata"
-                  poster="/bpengu.png"
                 >
                   <source src="/ppp1.mp4" type="video/mp4" />
                 </video>
@@ -1861,7 +1877,6 @@ function App() {
                   muted
                   playsInline
                   preload="metadata"
-                  poster="/bpengu.png"
                 >
                   <source src="/ppp2.mp4" type="video/mp4" />
                 </video>
@@ -1874,7 +1889,6 @@ function App() {
                   muted
                   playsInline
                   preload="metadata"
-                  poster="/bpengu.png"
                 >
                   <source src="/ppp3.mp4" type="video/mp4" />
                 </video>
