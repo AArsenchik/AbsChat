@@ -1413,6 +1413,11 @@ function App() {
   const lastOnlineAt = activePeerLower ? onlinePeers[activePeerLower] : undefined
   const isPeerOnline =
     activePeerValid && lastOnlineAt ? onlineTick - lastOnlineAt < 12000 : false
+  const handleBackToList = () => {
+    setActivePeer('')
+    setPeerInput('')
+    setError(null)
+  }
 
   return (
     <div className="app">
@@ -1471,7 +1476,7 @@ function App() {
         </div>
       </header>
 
-      <main className="app__main">
+      <main className={`app__main ${activePeerValid ? 'app__main--chat' : ''}`}>
         <section className="panel panel--left">
           <div className="panel__title">{t.conversationsTitle}</div>
           <div className="address">
@@ -1591,6 +1596,25 @@ function App() {
 
         <section className="panel panel--chat">
           <div className="chat__header">
+            {activePeerValid && (
+              <button
+                className="chat__back"
+                onClick={handleBackToList}
+                aria-label="Back"
+                title="Back"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    d="M15 6l-6 6 6 6"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+            )}
             <div className="chat__left">
               {activePeerValid && (
                 <div className="chat__avatar">
@@ -1672,7 +1696,17 @@ function App() {
                     </div>
                     <div className="message__text">
                       {gifSrc ? (
-                        <video className="message__gif" src={gifSrc} autoPlay loop muted playsInline />
+                        <video
+                          className="message__gif"
+                          autoPlay
+                          loop
+                          muted
+                          playsInline
+                          preload="metadata"
+                          poster="/bpengu.png"
+                        >
+                          <source src={gifSrc} type="video/mp4" />
+                        </video>
                       ) : (
                         message.text
                       )}
@@ -1807,13 +1841,43 @@ function App() {
             </div>
             <div className="emoji-modal__grid">
               <button className="emoji-modal__item" onClick={() => handleSendGif('ppp1.mp4')}>
-                <video className="emoji-modal__video" src="/ppp1.mp4" autoPlay loop muted playsInline />
+                <video
+                  className="emoji-modal__video"
+                  autoPlay
+                  loop
+                  muted
+                  playsInline
+                  preload="metadata"
+                  poster="/bpengu.png"
+                >
+                  <source src="/ppp1.mp4" type="video/mp4" />
+                </video>
               </button>
               <button className="emoji-modal__item" onClick={() => handleSendGif('ppp2.mp4')}>
-                <video className="emoji-modal__video" src="/ppp2.mp4" autoPlay loop muted playsInline />
+                <video
+                  className="emoji-modal__video"
+                  autoPlay
+                  loop
+                  muted
+                  playsInline
+                  preload="metadata"
+                  poster="/bpengu.png"
+                >
+                  <source src="/ppp2.mp4" type="video/mp4" />
+                </video>
               </button>
               <button className="emoji-modal__item" onClick={() => handleSendGif('ppp3.mp4')}>
-                <video className="emoji-modal__video" src="/ppp3.mp4" autoPlay loop muted playsInline />
+                <video
+                  className="emoji-modal__video"
+                  autoPlay
+                  loop
+                  muted
+                  playsInline
+                  preload="metadata"
+                  poster="/bpengu.png"
+                >
+                  <source src="/ppp3.mp4" type="video/mp4" />
+                </video>
               </button>
             </div>
           </div>
