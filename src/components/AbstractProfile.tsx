@@ -87,6 +87,7 @@ export function AbstractProfile({
 
   const resolvedAddress = (address ?? connectedAddress ?? '').toString()
   const normalizedAddress = resolvedAddress.trim().toLowerCase()
+  const connectedLower = (connectedAddress ?? '').toLowerCase()
   const cachedEntry = normalizedAddress ? avatarCache.get(normalizedAddress) : null
   const remoteSrc = src ?? cachedEntry?.value ?? null
   const fallbackStage = normalizedAddress ? (fallbackStages[normalizedAddress] ?? 0) : 0
@@ -106,6 +107,9 @@ export function AbstractProfile({
 
   useEffect(() => {
     if (!normalizedAddress || src) {
+      return
+    }
+    if (connectedLower && normalizedAddress !== connectedLower) {
       return
     }
     if (Date.now() < getPortalBackoffUntil()) {
@@ -159,7 +163,7 @@ export function AbstractProfile({
       isActive = false
       controller.abort()
     }
-  }, [normalizedAddress, src])
+  }, [normalizedAddress, src, connectedLower])
 
   return (
     <div 

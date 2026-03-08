@@ -634,6 +634,36 @@ function App() {
     customAvatarsRef.current = customAvatars
   }, [customAvatars])
 
+  const applyPeerVisibility = useCallback(
+    (peer: string, hidden: boolean, updatedAt: string) => {
+      const peerLower = peer.toLowerCase()
+      const current = peerVisibilityUpdatedAtRef.current[peerLower] ?? '1970-01-01'
+      if (updatedAt <= current) return
+      peerVisibilityUpdatedAtRef.current = {
+        ...peerVisibilityUpdatedAtRef.current,
+        [peerLower]: updatedAt,
+      }
+      setPeerVisibilityUpdatedAt((prev) => {
+        const existing = prev[peerLower] ?? '1970-01-01'
+        if (updatedAt <= existing) return prev
+        return { ...prev, [peerLower]: updatedAt }
+      })
+      setHiddenPeers((prev) => {
+        if (hidden) {
+          if (prev.includes(peerLower)) return prev
+          return [...prev, peerLower]
+        }
+        if (!prev.includes(peerLower)) return prev
+        return prev.filter((p) => p !== peerLower)
+      })
+      if (hidden && activePeerRef.current === peerLower) {
+        setActivePeer('')
+        setPeerInput('')
+      }
+    },
+    [],
+  )
+
   useEffect(() => {
     const root = document.documentElement
     const updateHeight = () => {
@@ -1251,6 +1281,25 @@ function App() {
           })
         }
       }
+
+      let newestIncomingByPeer: Record<string, string> | null = null
+      for (const row of rows) {
+        const fromLower = row.from_address.toLowerCase()
+        const toLower = row.to_address.toLowerCase()
+        if (fromLower === addressLower || toLower !== addressLower) continue
+        if (!newestIncomingByPeer) {
+          newestIncomingByPeer = {}
+        }
+        const current = newestIncomingByPeer[fromLower]
+        if (!current || row.created_at > current) {
+          newestIncomingByPeer[fromLower] = row.created_at
+        }
+      }
+      if (newestIncomingByPeer) {
+        for (const [peerLower, createdAt] of Object.entries(newestIncomingByPeer)) {
+          applyPeerVisibility(peerLower, false, createdAt)
+        }
+      }
     }
 
     const loadHistory = async () => {
@@ -1305,11 +1354,14 @@ function App() {
       pollMessagesInFlightRef.current = true
       try {
         const lastCreated = lastMessageTimestampRef.current
+        const nowMs = Date.now()
         const lastCreatedMs = Date.parse(lastCreated)
+        const clampedLastCreatedMs =
+          Number.isFinite(lastCreatedMs) && lastCreatedMs <= nowMs
+            ? lastCreatedMs
+            : nowMs
         const overlapStart = new Date(
-          Number.isFinite(lastCreatedMs)
-            ? Math.max(0, lastCreatedMs - MESSAGE_POLL_OVERLAP_MS)
-            : Date.now() - MESSAGE_POLL_OVERLAP_MS,
+          Math.max(0, clampedLastCreatedMs - MESSAGE_POLL_OVERLAP_MS),
         ).toISOString()
 
         const { data } = await supabaseClient
@@ -1339,7 +1391,7 @@ function App() {
       supabaseClient.removeChannel(channel)
       clearInterval(interval)
     }
-  }, [address])
+  }, [address, applyPeerVisibility])
 
   useEffect(() => {
     if (!address || !publicClient) return
@@ -1440,6 +1492,19 @@ function App() {
               })
             }
           }
+          const newestIncomingByPeer: Record<string, string> = {}
+          for (const message of discovered) {
+            const fromLower = message.from.toLowerCase()
+            const toLower = message.to.toLowerCase()
+            if (fromLower === ownLower || toLower !== ownLower) continue
+            const current = newestIncomingByPeer[fromLower]
+            if (!current || message.createdAt > current) {
+              newestIncomingByPeer[fromLower] = message.createdAt
+            }
+          }
+          Object.entries(newestIncomingByPeer).forEach(([peerLower, createdAt]) => {
+            applyPeerVisibility(peerLower, false, createdAt)
+          })
           setMessages((prev) => mergeMessages(prev, discovered))
         }
         if (supabase && upserts.length) {
@@ -1465,37 +1530,7 @@ function App() {
       pollIncomingInFlightRef.current = false
       clearInterval(interval)
     }
-  }, [address, publicClient, peers])
-
-  const applyPeerVisibility = useCallback(
-    (peer: string, hidden: boolean, updatedAt: string) => {
-      const peerLower = peer.toLowerCase()
-      const current = peerVisibilityUpdatedAtRef.current[peerLower] ?? '1970-01-01'
-      if (updatedAt <= current) return
-      peerVisibilityUpdatedAtRef.current = {
-        ...peerVisibilityUpdatedAtRef.current,
-        [peerLower]: updatedAt,
-      }
-      setPeerVisibilityUpdatedAt((prev) => {
-        const existing = prev[peerLower] ?? '1970-01-01'
-        if (updatedAt <= existing) return prev
-        return { ...prev, [peerLower]: updatedAt }
-      })
-      setHiddenPeers((prev) => {
-        if (hidden) {
-          if (prev.includes(peerLower)) return prev
-          return [...prev, peerLower]
-        }
-        if (!prev.includes(peerLower)) return prev
-        return prev.filter((p) => p !== peerLower)
-      })
-      if (hidden && activePeerRef.current === peerLower) {
-        setActivePeer('')
-        setPeerInput('')
-      }
-    },
-    [],
-  )
+  }, [address, publicClient, peers, applyPeerVisibility])
 
   useEffect(() => {
     const supabaseClient = supabase
