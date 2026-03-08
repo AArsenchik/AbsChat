@@ -565,6 +565,7 @@ function App() {
   const typingTimeoutsRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const typingSendTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastTypingSentRef = useRef<number>(0)
+  const lastMessageHintSentRef = useRef<number>(0)
   const pollMessagesInFlightRef = useRef(false)
   const pollIncomingInFlightRef = useRef(false)
   const signalsChannelRef = useRef<
@@ -1261,6 +1262,32 @@ function App() {
       Object.entries(newestBySender).forEach(([sender, createdAt]) => {
         applyPeerVisibility(sender, false, createdAt)
       })
+
+      const incomingRows = rows.filter(
+        (row) =>
+          row.to_address.toLowerCase() === addressLower &&
+          row.from_address.toLowerCase() !== addressLower,
+      )
+      if (incomingRows.length > 0) {
+        const newestIncoming = incomingRows.reduce((latest, row) =>
+          row.created_at > latest.created_at ? row : latest,
+        )
+        const now = Date.now()
+        if (now - lastMessageHintSentRef.current > 800) {
+          lastMessageHintSentRef.current = now
+          signalsChannelRef.current?.send({
+            type: 'broadcast',
+            event: 'message_hint',
+            payload: {
+              from: addressLower,
+              to: addressLower,
+              deviceId: deviceIdRef.current,
+              txHash: newestIncoming.tx_hash,
+              since: newestIncoming.created_at,
+            },
+          })
+        }
+      }
     },
     [address, applyPeerVisibility],
   )
@@ -1288,6 +1315,25 @@ function App() {
     },
     [address, ingestMessages],
   )
+
+  useEffect(() => {
+    if (!address) return
+    const handleFocus = () => {
+      const since = lastMessageTimestampRef.current
+      void fetchMessageUpdates({ since })
+    }
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        handleFocus()
+      }
+    }
+    window.addEventListener('focus', handleFocus)
+    document.addEventListener('visibilitychange', handleVisibility)
+    return () => {
+      window.removeEventListener('focus', handleFocus)
+      document.removeEventListener('visibilitychange', handleVisibility)
+    }
+  }, [address, fetchMessageUpdates])
 
   useEffect(() => {
     const supabaseClient = supabase
@@ -1368,7 +1414,7 @@ function App() {
       }
     }
 
-    const interval = setInterval(pollMessages, 8000)
+    const interval = setInterval(pollMessages, 3000)
 
     return () => {
       cancelled = true
@@ -1495,7 +1541,7 @@ function App() {
       }
     }
 
-    const interval = setInterval(pollIncoming, 12000)
+    const interval = setInterval(pollIncoming, 7000)
     pollIncoming()
     return () => {
       cancelled = true
