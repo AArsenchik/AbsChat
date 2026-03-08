@@ -565,6 +565,8 @@ function App() {
   const typingTimeoutsRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const typingSendTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastTypingSentRef = useRef<number>(0)
+  const pollMessagesInFlightRef = useRef(false)
+  const pollIncomingInFlightRef = useRef(false)
   const signalsChannelRef = useRef<
     ReturnType<NonNullable<typeof supabase>['channel']> | null
   >(null)
@@ -574,6 +576,7 @@ function App() {
       : `${Date.now()}-${Math.random()}`,
   )
   const hiddenPeersRef = useRef<string[]>([])
+  const peerVisibilityUpdatedAtRef = useRef<Record<string, string>>({})
   const customNamesRef = useRef<Record<string, string | null>>({})
   const customAvatarsRef = useRef<Record<string, string | null>>({})
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -583,6 +586,7 @@ function App() {
   const [profileNameDraft, setProfileNameDraft] = useState('')
   const [profileError, setProfileError] = useState<string | null>(null)
   const [hiddenPeers, setHiddenPeers] = useState<string[]>([])
+  const [peerVisibilityUpdatedAt, setPeerVisibilityUpdatedAt] = useState<Record<string, string>>({})
 
   useEffect(() => {
     conversationKeyRef.current = conversationKey
@@ -595,6 +599,10 @@ function App() {
   useEffect(() => {
     hiddenPeersRef.current = hiddenPeers
   }, [hiddenPeers])
+
+  useEffect(() => {
+    peerVisibilityUpdatedAtRef.current = peerVisibilityUpdatedAt
+  }, [peerVisibilityUpdatedAt])
 
   useEffect(() => {
     customNamesRef.current = customNames
@@ -753,7 +761,9 @@ function App() {
     const controller = new AbortController()
     const load = async () => {
       const updates: Record<string, string | null> = {}
-      for (const peerLower of targets) {
+      if (document.visibilityState === 'hidden') return
+      const peersToLoad = Array.from(targets).slice(0, 24)
+      for (const peerLower of peersToLoad) {
         const cached = profileNameCache.get(peerLower)
         if (cached) {
           const isFresh = Date.now() - cached.ts < PROFILE_CACHE_TTL
@@ -781,6 +791,7 @@ function App() {
               : null
           profileNameCache.set(peerLower, { value: name, ts: Date.now() })
           updates[peerLower] = name
+          await wait(40)
         } catch (err) {
           if ((err as Error).name === 'AbortError') return
           profileNameCache.set(peerLower, { value: null, ts: Date.now() })
@@ -959,6 +970,9 @@ function App() {
         setProfileNames({})
         setCustomNames({})
         setCustomAvatars({})
+        setHiddenPeers([])
+        setPeerVisibilityUpdatedAt({})
+        setLastReadByPeer({})
         setReadReceiptsByPeer({})
         return
       }
@@ -969,6 +983,7 @@ function App() {
         customNames?: Record<string, string | null>
         customAvatars?: Record<string, string | null>
         hiddenPeers?: string[]
+        peerVisibilityUpdatedAt?: Record<string, string>
         lastReadByPeer?: Record<string, string>
         readReceiptsByPeer?: Record<string, string>
       }
@@ -982,6 +997,7 @@ function App() {
       setCustomNames(parsed.customNames ?? {})
       setCustomAvatars(parsed.customAvatars ?? {})
       setHiddenPeers(parsed.hiddenPeers ?? [])
+      setPeerVisibilityUpdatedAt(parsed.peerVisibilityUpdatedAt ?? {})
       setLastReadByPeer(parsed.lastReadByPeer ?? {})
       setReadReceiptsByPeer(parsed.readReceiptsByPeer ?? {})
       lastScannedBlock.current = parsed.lastScannedBlock
@@ -995,6 +1011,7 @@ function App() {
       setCustomNames({})
       setCustomAvatars({})
       setHiddenPeers([])
+      setPeerVisibilityUpdatedAt({})
       setLastReadByPeer({})
       setReadReceiptsByPeer({})
     }
@@ -1117,6 +1134,7 @@ function App() {
       customNames,
       customAvatars,
       hiddenPeers,
+      peerVisibilityUpdatedAt,
       lastReadByPeer,
       readReceiptsByPeer,
     }
@@ -1129,6 +1147,7 @@ function App() {
     customNames,
     customAvatars,
     hiddenPeers,
+    peerVisibilityUpdatedAt,
     lastReadByPeer,
     readReceiptsByPeer,
   ])
@@ -1253,6 +1272,9 @@ function App() {
 
     // Polling for new messages (fallback for Realtime)
     const pollMessages = async () => {
+      if (pollMessagesInFlightRef.current) return
+      if (document.visibilityState === 'hidden') return
+      pollMessagesInFlightRef.current = true
       try {
         const lastCreated = lastMessageTimestampRef.current
 
@@ -1270,13 +1292,16 @@ function App() {
         }
       } catch {
         // Ignore errors during polling
+      } finally {
+        pollMessagesInFlightRef.current = false
       }
     }
 
-    const interval = setInterval(pollMessages, 3000)
+    const interval = setInterval(pollMessages, 8000)
 
     return () => {
       cancelled = true
+      pollMessagesInFlightRef.current = false
       supabaseClient.removeChannel(channel)
       clearInterval(interval)
     }
@@ -1285,17 +1310,24 @@ function App() {
   useEffect(() => {
     if (!address || !publicClient) return
     let cancelled = false
+    const ownLower = address.toLowerCase()
+    const peerSet = new Set(peers.map((peer) => peer.toLowerCase()))
+    const MAX_BLOCKS_PER_POLL = 35n
 
     const pollIncoming = async () => {
+      if (pollIncomingInFlightRef.current) return
+      if (document.visibilityState === 'hidden') return
+      pollIncomingInFlightRef.current = true
       try {
         const latest = await publicClient.getBlockNumber()
         const start =
           lastScannedBlock.current ??
-          (latest > 600n ? latest - 600n : 0n)
+          (latest > 180n ? latest - 180n : 0n)
         if (start >= latest) {
           lastScannedBlock.current = latest
           return
         }
+        const endBlock = start + MAX_BLOCKS_PER_POLL < latest ? start + MAX_BLOCKS_PER_POLL : latest
         const discovered: Message[] = []
         const upserts: Array<{
           tx_hash: string
@@ -1305,7 +1337,7 @@ function App() {
           created_at: string
           chain_id: number
         }> = []
-        for (let blockNumber = start + 1n; blockNumber <= latest; blockNumber++) {
+        for (let blockNumber = start + 1n; blockNumber <= endBlock; blockNumber++) {
           const block = await publicClient.getBlock({
             blockNumber,
             includeTransactions: true,
@@ -1316,11 +1348,9 @@ function App() {
           ).toISOString()
           const incoming = block.transactions.filter(
             (tx) =>
-              (tx.to?.toLowerCase() === address.toLowerCase() ||
+              (tx.to?.toLowerCase() === ownLower ||
                 (tx.from.toLowerCase() === tx.to?.toLowerCase() &&
-                  peers.some(
-                    (p) => p.toLowerCase() === tx.from.toLowerCase(),
-                  ))) &&
+                  peerSet.has(tx.from.toLowerCase()))) &&
               tx.input &&
               tx.input !== '0x',
           )
@@ -1361,7 +1391,7 @@ function App() {
             for (const message of discovered) {
               if (
                 message.from.toLowerCase() === activeLower &&
-                message.to.toLowerCase() === address.toLowerCase()
+                message.to.toLowerCase() === ownLower
               ) {
                 if (!newest || message.createdAt > newest) {
                   newest = message.createdAt
@@ -1384,21 +1414,54 @@ function App() {
           })
         }
         if (!cancelled) {
-          lastScannedBlock.current = latest
-          setLastSyncBlock(latest.toString())
+          lastScannedBlock.current = endBlock
+          setLastSyncBlock(endBlock.toString())
         }
       } catch {
         return
+      } finally {
+        pollIncomingInFlightRef.current = false
       }
     }
 
-    const interval = setInterval(pollIncoming, 7000)
+    const interval = setInterval(pollIncoming, 12000)
     pollIncoming()
     return () => {
       cancelled = true
+      pollIncomingInFlightRef.current = false
       clearInterval(interval)
     }
   }, [address, publicClient, peers])
+
+  const applyPeerVisibility = useCallback(
+    (peer: string, hidden: boolean, updatedAt: string) => {
+      const peerLower = peer.toLowerCase()
+      const current = peerVisibilityUpdatedAtRef.current[peerLower] ?? '1970-01-01'
+      if (updatedAt <= current) return
+      peerVisibilityUpdatedAtRef.current = {
+        ...peerVisibilityUpdatedAtRef.current,
+        [peerLower]: updatedAt,
+      }
+      setPeerVisibilityUpdatedAt((prev) => {
+        const existing = prev[peerLower] ?? '1970-01-01'
+        if (updatedAt <= existing) return prev
+        return { ...prev, [peerLower]: updatedAt }
+      })
+      setHiddenPeers((prev) => {
+        if (hidden) {
+          if (prev.includes(peerLower)) return prev
+          return [...prev, peerLower]
+        }
+        if (!prev.includes(peerLower)) return prev
+        return prev.filter((p) => p !== peerLower)
+      })
+      if (hidden && activePeerRef.current === peerLower) {
+        setActivePeer('')
+        setPeerInput('')
+      }
+    },
+    [],
+  )
 
   useEffect(() => {
     const supabaseClient = supabase
@@ -1496,21 +1559,15 @@ function App() {
           to?: string
           peer?: string
           hidden?: boolean
+          updatedAt?: string
         }
         if (!data?.from || !data?.to || !data.peer) return
         if (data.to.toLowerCase() !== addressLower) return
-        const peerLower = data.peer.toLowerCase()
-        setHiddenPeers((prev) => {
-          if (data.hidden) {
-            if (prev.includes(peerLower)) return prev
-            return [...prev, peerLower]
-          }
-          return prev.filter((p) => p !== peerLower)
-        })
-        if (data.hidden && activePeerRef.current === peerLower) {
-          setActivePeer('')
-          setPeerInput('')
-        }
+        applyPeerVisibility(
+          data.peer,
+          Boolean(data.hidden),
+          data.updatedAt ?? new Date().toISOString(),
+        )
       })
       .on('broadcast', { event: 'sync_request' }, (payload) => {
         const data = payload.payload as {
@@ -1521,6 +1578,7 @@ function App() {
         if (!data?.from || !data?.to || !data.deviceId) return
         if (data.to.toLowerCase() !== addressLower) return
         if (data.deviceId === deviceIdRef.current) return
+        if (document.visibilityState === 'hidden') return
         channel.send({
           type: 'broadcast',
           event: 'sync_state',
@@ -1529,6 +1587,7 @@ function App() {
             to: addressLower,
             deviceId: data.deviceId,
             hiddenPeers: hiddenPeersRef.current,
+            peerVisibilityUpdatedAt: peerVisibilityUpdatedAtRef.current,
             customNames: customNamesRef.current,
             customAvatars: customAvatarsRef.current,
           },
@@ -1540,18 +1599,30 @@ function App() {
           to?: string
           deviceId?: string
           hiddenPeers?: string[]
+          peerVisibilityUpdatedAt?: Record<string, string>
           customNames?: Record<string, string | null>
           customAvatars?: Record<string, string | null>
         }
         if (!data?.from || !data?.to || !data.deviceId) return
         if (data.to.toLowerCase() !== addressLower) return
         if (data.deviceId !== deviceIdRef.current) return
-        if (Array.isArray(data.hiddenPeers)) {
-          const normalized = Array.from(
-            new Set(data.hiddenPeers.map((peer) => peer.toLowerCase())),
-          )
-          setHiddenPeers(normalized)
-        }
+        const incomingHidden = new Set(
+          Array.isArray(data.hiddenPeers)
+            ? data.hiddenPeers.map((peer) => peer.toLowerCase())
+            : [],
+        )
+        const incomingUpdatedAt =
+          data.peerVisibilityUpdatedAt && typeof data.peerVisibilityUpdatedAt === 'object'
+            ? data.peerVisibilityUpdatedAt
+            : {}
+        const visibilityPeers = new Set([
+          ...Object.keys(incomingUpdatedAt),
+          ...incomingHidden,
+        ])
+        visibilityPeers.forEach((peer) => {
+          const updatedAt = incomingUpdatedAt[peer] ?? '1970-01-01'
+          applyPeerVisibility(peer, incomingHidden.has(peer), updatedAt)
+        })
         if (data.customNames && typeof data.customNames === 'object') {
           setCustomNames((prev) => ({ ...prev, ...data.customNames }))
         }
@@ -1577,7 +1648,7 @@ function App() {
       channel.unsubscribe()
       signalsChannelRef.current = null
     }
-  }, [address])
+  }, [address, applyPeerVisibility])
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -1634,7 +1705,7 @@ function App() {
   )
 
   const emitPeerVisibility = useCallback(
-    (peer: string, hidden: boolean) => {
+    (peer: string, hidden: boolean, updatedAt: string) => {
       if (!signalsChannelRef.current || !address) return
       const addressLower = address.toLowerCase()
       signalsChannelRef.current.send({
@@ -1645,6 +1716,7 @@ function App() {
           to: addressLower,
           peer,
           hidden,
+          updatedAt,
         },
       })
     },
@@ -1693,12 +1765,13 @@ function App() {
     )
     if (!confirmed) return
     const peerLower = peer.toLowerCase()
+    const updatedAt = new Date().toISOString()
     if (activePeer.toLowerCase() === peerLower) {
       setActivePeer('')
       setPeerInput('')
     }
-    setHiddenPeers((prev) => (prev.includes(peerLower) ? prev : [...prev, peerLower]))
-    emitPeerVisibility(peerLower, true)
+    applyPeerVisibility(peerLower, true, updatedAt)
+    emitPeerVisibility(peerLower, true, updatedAt)
   }
 
   const handleSetPeer = () => {
@@ -1707,24 +1780,26 @@ function App() {
       return
     }
     const peer = peerInput.toLowerCase()
+    const updatedAt = new Date().toISOString()
     setActivePeer(peer)
-    setHiddenPeers((prev) => prev.filter((p) => p !== peer))
+    applyPeerVisibility(peer, false, updatedAt)
     setLastReadByPeer((prev) => ({ ...prev, [peer]: new Date().toISOString() }))
     setError(null)
-    emitPeerVisibility(peer, false)
+    emitPeerVisibility(peer, false, updatedAt)
   }
 
   const handleSelectPeer = (peer: string) => {
     const peerLower = peer.toLowerCase()
+    const updatedAt = new Date().toISOString()
     setActivePeer(peerLower)
     setPeerInput(peerLower)
-    setHiddenPeers((prev) => prev.filter((p) => p !== peerLower))
+    applyPeerVisibility(peerLower, false, updatedAt)
     setLastReadByPeer((prev) => ({
       ...prev,
       [peerLower]: new Date().toISOString(),
     }))
     setError(null)
-    emitPeerVisibility(peerLower, false)
+    emitPeerVisibility(peerLower, false, updatedAt)
   }
 
   const sendMessage = async (overrideText?: string) => {
