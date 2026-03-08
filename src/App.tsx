@@ -568,12 +568,21 @@ function App() {
   const signalsChannelRef = useRef<
     ReturnType<NonNullable<typeof supabase>['channel']> | null
   >(null)
+  const deviceIdRef = useRef<string>(
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random()}`,
+  )
+  const hiddenPeersRef = useRef<string[]>([])
+  const customNamesRef = useRef<Record<string, string | null>>({})
+  const customAvatarsRef = useRef<Record<string, string | null>>({})
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [profileOpen, setProfileOpen] = useState(false)
   const [profileEditing, setProfileEditing] = useState(false)
   const [profileSaving, setProfileSaving] = useState(false)
   const [profileNameDraft, setProfileNameDraft] = useState('')
   const [profileError, setProfileError] = useState<string | null>(null)
+  const [hiddenPeers, setHiddenPeers] = useState<string[]>([])
 
   useEffect(() => {
     conversationKeyRef.current = conversationKey
@@ -582,6 +591,18 @@ function App() {
   useEffect(() => {
     activePeerRef.current = activePeer ? activePeer.toLowerCase() : ''
   }, [activePeer])
+
+  useEffect(() => {
+    hiddenPeersRef.current = hiddenPeers
+  }, [hiddenPeers])
+
+  useEffect(() => {
+    customNamesRef.current = customNames
+  }, [customNames])
+
+  useEffect(() => {
+    customAvatarsRef.current = customAvatars
+  }, [customAvatars])
 
   useEffect(() => {
     const root = document.documentElement
@@ -614,8 +635,6 @@ function App() {
     }
   }, [])
 
-  const [hiddenPeers, setHiddenPeers] = useState<string[]>([])
-  
   const chatBodyRef = useRef<HTMLDivElement>(null)
   const shouldAutoScrollRef = useRef<boolean>(true)
   const handleChatScroll = () => {
@@ -823,11 +842,31 @@ function App() {
       if (!supabaseClient) {
         throw new Error('Supabase is not configured')
       }
+      const withTimeout = async <T,>(promise: Promise<T>, ms: number) => {
+        let timeoutId: ReturnType<typeof setTimeout> | null = null
+        const timeout = new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(() => {
+            reject(new Error('Profile save timed out'))
+          }, ms)
+        })
+        try {
+          return await Promise.race([promise, timeout])
+        } finally {
+          if (timeoutId) {
+            clearTimeout(timeoutId)
+          }
+        }
+      }
       const attempt = async () => {
-        const { data, error } = await supabaseClient
+        const request = supabaseClient
           .from('profiles')
           .upsert([payload], { onConflict: 'address' })
           .select('address, display_name, avatar_url')
+        const response = await withTimeout(Promise.resolve(request), 12000)
+        const { data, error } = response as {
+          data: SupabaseProfile[] | null
+          error: unknown
+        }
         if (error) {
           throw error
         }
@@ -1120,12 +1159,8 @@ function App() {
     let cancelled = false
     const addressLower = address.toLowerCase()
 
-    const processIncomingMessages = async (
-      rows: SupabaseMessage[],
-      options?: { allowUnhide?: boolean },
-    ) => {
+    const processIncomingMessages = async (rows: SupabaseMessage[]) => {
       if (!rows.length) return
-      const allowUnhide = options?.allowUnhide ?? true
       
       const mapped = await Promise.all(rows.map(async (row) => {
         const m = toMessage(row)
@@ -1169,18 +1204,6 @@ function App() {
           })
         }
       }
-      
-      const incoming = rows.filter(
-        (m) => m.from_address.toLowerCase() !== addressLower,
-      )
-      if (allowUnhide && incoming.length > 0) {
-        const senders = new Set(
-          incoming.map((m) => m.from_address.toLowerCase()),
-        )
-        setHiddenPeers((prev) =>
-          prev.filter((p) => !senders.has(p.toLowerCase())),
-        )
-      }
     }
 
     const loadHistory = async () => {
@@ -1194,7 +1217,7 @@ function App() {
           .limit(5000)
 
         if (!cancelled && data) {
-          await processIncomingMessages(data, { allowUnhide: false })
+          await processIncomingMessages(data)
         }
       } catch {
         return
@@ -1354,13 +1377,6 @@ function App() {
             }
           }
           setMessages((prev) => mergeMessages(prev, discovered))
-          const incoming = discovered.filter(
-            (m) => m.from.toLowerCase() !== address.toLowerCase(),
-          )
-          if (incoming.length > 0) {
-            const senders = new Set(incoming.map((m) => m.from.toLowerCase()))
-            setHiddenPeers((prev) => prev.filter((p) => !senders.has(p)))
-          }
         }
         if (supabase && upserts.length) {
           await supabase.from('messages').upsert(upserts, {
@@ -1496,7 +1512,66 @@ function App() {
           setPeerInput('')
         }
       })
-      .subscribe()
+      .on('broadcast', { event: 'sync_request' }, (payload) => {
+        const data = payload.payload as {
+          from?: string
+          to?: string
+          deviceId?: string
+        }
+        if (!data?.from || !data?.to || !data.deviceId) return
+        if (data.to.toLowerCase() !== addressLower) return
+        if (data.deviceId === deviceIdRef.current) return
+        channel.send({
+          type: 'broadcast',
+          event: 'sync_state',
+          payload: {
+            from: addressLower,
+            to: addressLower,
+            deviceId: data.deviceId,
+            hiddenPeers: hiddenPeersRef.current,
+            customNames: customNamesRef.current,
+            customAvatars: customAvatarsRef.current,
+          },
+        })
+      })
+      .on('broadcast', { event: 'sync_state' }, (payload) => {
+        const data = payload.payload as {
+          from?: string
+          to?: string
+          deviceId?: string
+          hiddenPeers?: string[]
+          customNames?: Record<string, string | null>
+          customAvatars?: Record<string, string | null>
+        }
+        if (!data?.from || !data?.to || !data.deviceId) return
+        if (data.to.toLowerCase() !== addressLower) return
+        if (data.deviceId !== deviceIdRef.current) return
+        if (Array.isArray(data.hiddenPeers)) {
+          const normalized = Array.from(
+            new Set(data.hiddenPeers.map((peer) => peer.toLowerCase())),
+          )
+          setHiddenPeers(normalized)
+        }
+        if (data.customNames && typeof data.customNames === 'object') {
+          setCustomNames((prev) => ({ ...prev, ...data.customNames }))
+        }
+        if (data.customAvatars && typeof data.customAvatars === 'object') {
+          setCustomAvatars((prev) => ({ ...prev, ...data.customAvatars }))
+        }
+      })
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          channel.send({
+            type: 'broadcast',
+            event: 'sync_request',
+            payload: {
+              from: addressLower,
+              to: addressLower,
+              deviceId: deviceIdRef.current,
+            },
+          })
+        }
+      })
 
     return () => {
       channel.unsubscribe()
