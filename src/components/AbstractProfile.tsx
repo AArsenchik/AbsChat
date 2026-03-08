@@ -13,29 +13,8 @@ interface AbstractProfileProps {
 
 const avatarCache = new Map<string, { value: string | null; ts: number }>()
 const AVATAR_CACHE_TTL = 5 * 60 * 1000
-const PORTAL_BACKOFF_KEY = 'portal-backoff-until'
-const PORTAL_BACKOFF_MS = 5 * 60 * 1000
 
 const imageUrlRegex = /https?:\/\/[^"'\s]+?\.(?:png|jpe?g|webp|gif)(?:\?[^"'\s]*)?/i
-
-const getPortalBackoffUntil = () => {
-  try {
-    const raw = localStorage.getItem(PORTAL_BACKOFF_KEY)
-    if (!raw) return 0
-    const value = Number(raw)
-    return Number.isFinite(value) ? value : 0
-  } catch {
-    return 0
-  }
-}
-
-const setPortalBackoffUntil = (value: number) => {
-  try {
-    localStorage.setItem(PORTAL_BACKOFF_KEY, String(value))
-  } catch {
-    return
-  }
-}
 
 function findImageUrl(data: unknown): string | null {
   if (!data) return null
@@ -108,15 +87,6 @@ export function AbstractProfile({
     if (!normalizedAddress || src) {
       return
     }
-    if (size === 'sm') {
-      return
-    }
-    if (document.visibilityState === 'hidden') {
-      return
-    }
-    if (Date.now() < getPortalBackoffUntil()) {
-      return
-    }
     const cached = avatarCache.get(normalizedAddress)
     if (cached) {
       const isFresh = Date.now() - cached.ts < AVATAR_CACHE_TTL
@@ -129,15 +99,8 @@ export function AbstractProfile({
     ]
     const load = async () => {
       for (const url of endpoints) {
-        if (Date.now() < getPortalBackoffUntil()) {
-          return
-        }
         try {
           const response = await fetch(url, { signal: controller.signal })
-          if (response.status === 403 || response.status === 429) {
-            setPortalBackoffUntil(Date.now() + PORTAL_BACKOFF_MS)
-            return
-          }
           if (!response.ok) continue
           const contentType = response.headers.get('content-type') ?? ''
           let found: string | null = null
@@ -165,7 +128,7 @@ export function AbstractProfile({
       isActive = false
       controller.abort()
     }
-  }, [normalizedAddress, src, size])
+  }, [normalizedAddress, src])
 
   return (
     <div 

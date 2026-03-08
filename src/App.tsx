@@ -300,9 +300,6 @@ const MessageList = memo(function MessageList({
 
 const profileNameCache = new Map<string, { value: string | null; ts: number }>()
 const PROFILE_CACHE_TTL = 5 * 60 * 1000
-const PORTAL_BACKOFF_KEY = 'portal-backoff-until'
-const PORTAL_BACKOFF_MS = 30 * 60 * 1000
-const MESSAGE_POLL_OVERLAP_MS = 2 * 60 * 60 * 1000
 
 const shorten = (value?: string) => {
   if (!value) return '—'
@@ -343,25 +340,6 @@ const isTransientError = (error: unknown) => {
 }
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
-
-const getPortalBackoffUntil = () => {
-  try {
-    const raw = localStorage.getItem(PORTAL_BACKOFF_KEY)
-    if (!raw) return 0
-    const value = Number(raw)
-    return Number.isFinite(value) ? value : 0
-  } catch {
-    return 0
-  }
-}
-
-const setPortalBackoffUntil = (value: number) => {
-  try {
-    localStorage.setItem(PORTAL_BACKOFF_KEY, String(value))
-  } catch {
-    return
-  }
-}
 
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
@@ -776,7 +754,7 @@ function App() {
 
   useEffect(() => {
     const targets = new Set<string>()
-    if (address) targets.add(address.toLowerCase())
+    peers.forEach((peer) => targets.add(peer.toLowerCase()))
     if (activePeerValid) targets.add(activePeer.toLowerCase())
     if (targets.size === 0) return
     let cancelled = false
@@ -784,10 +762,8 @@ function App() {
     const load = async () => {
       const updates: Record<string, string | null> = {}
       if (document.visibilityState === 'hidden') return
-      if (Date.now() < getPortalBackoffUntil()) return
       const peersToLoad = Array.from(targets).slice(0, 24)
       for (const peerLower of peersToLoad) {
-        if (Date.now() < getPortalBackoffUntil()) break
         const cached = profileNameCache.get(peerLower)
         if (cached) {
           const isFresh = Date.now() - cached.ts < PROFILE_CACHE_TTL
@@ -803,10 +779,6 @@ function App() {
             `/api/portal?address=${encodeURIComponent(peerLower)}`,
             { signal: controller.signal }
           )
-          if (response.status === 403 || response.status === 429) {
-            setPortalBackoffUntil(Date.now() + PORTAL_BACKOFF_MS)
-            break
-          }
           if (!response.ok) {
             profileNameCache.set(peerLower, { value: null, ts: Date.now() })
             updates[peerLower] = null
@@ -836,7 +808,7 @@ function App() {
       cancelled = true
       controller.abort()
     }
-  }, [peers, activePeer, activePeerValid, address])
+  }, [peers, activePeer, activePeerValid])
 
   const loadProfiles = useCallback(
     async (addresses: string[]) => {
@@ -1230,6 +1202,31 @@ function App() {
       if (cancelled) return
       setMessages((prev) => mergeMessages(prev, mapped))
 
+      const newestIncomingByPeer: Record<string, string> = {}
+      for (const row of rows) {
+        const fromLower = row.from_address.toLowerCase()
+        const toLower = row.to_address.toLowerCase()
+        if (fromLower === addressLower || toLower !== addressLower) continue
+        const current = newestIncomingByPeer[fromLower]
+        if (!current || row.created_at > current) {
+          newestIncomingByPeer[fromLower] = row.created_at
+        }
+      }
+      for (const [peerLower, incomingAt] of Object.entries(newestIncomingByPeer)) {
+        const visibilityAt = peerVisibilityUpdatedAtRef.current[peerLower] ?? '1970-01-01'
+        if (incomingAt <= visibilityAt) continue
+        peerVisibilityUpdatedAtRef.current = {
+          ...peerVisibilityUpdatedAtRef.current,
+          [peerLower]: incomingAt,
+        }
+        setPeerVisibilityUpdatedAt((prev) => {
+          const current = prev[peerLower] ?? '1970-01-01'
+          if (incomingAt <= current) return prev
+          return { ...prev, [peerLower]: incomingAt }
+        })
+        setHiddenPeers((prev) => prev.filter((peer) => peer !== peerLower))
+      }
+
       const activeLower = activePeerRef.current
       if (activeLower) {
         let newest = ''
@@ -1301,24 +1298,19 @@ function App() {
     // Polling for new messages (fallback for Realtime)
     const pollMessages = async () => {
       if (pollMessagesInFlightRef.current) return
+      if (document.visibilityState === 'hidden') return
       pollMessagesInFlightRef.current = true
       try {
         const lastCreated = lastMessageTimestampRef.current
-        const lastCreatedMs = Date.parse(lastCreated)
-        const overlapStart = new Date(
-          Number.isFinite(lastCreatedMs)
-            ? Math.max(0, lastCreatedMs - MESSAGE_POLL_OVERLAP_MS)
-            : Date.now() - MESSAGE_POLL_OVERLAP_MS,
-        ).toISOString()
 
         const { data } = await supabaseClient
           .from('messages')
           .select('*')
           .eq('chain_id', abstract.id)
           .or(`from_address.eq.${addressLower},to_address.eq.${addressLower}`)
-          .gte('created_at', overlapStart)
+          .gt('created_at', lastCreated)
           .order('created_at', { ascending: true })
-          .limit(300)
+          .limit(100)
 
         if (!cancelled && data) {
           await processIncomingMessages(data)
@@ -1330,22 +1322,11 @@ function App() {
       }
     }
 
-    pollMessages()
-    const wakeSync = () => {
-      if (document.visibilityState === 'hidden') return
-      void pollMessages()
-    }
-    document.addEventListener('visibilitychange', wakeSync)
-    window.addEventListener('focus', wakeSync)
-    window.addEventListener('online', wakeSync)
-    const interval = setInterval(pollMessages, 5000)
+    const interval = setInterval(pollMessages, 8000)
 
     return () => {
       cancelled = true
       pollMessagesInFlightRef.current = false
-      document.removeEventListener('visibilitychange', wakeSync)
-      window.removeEventListener('focus', wakeSync)
-      window.removeEventListener('online', wakeSync)
       supabaseClient.removeChannel(channel)
       clearInterval(interval)
     }
@@ -1451,6 +1432,30 @@ function App() {
             }
           }
           setMessages((prev) => mergeMessages(prev, discovered))
+          const newestIncomingByPeer: Record<string, string> = {}
+          for (const message of discovered) {
+            const fromLower = message.from.toLowerCase()
+            const toLower = message.to.toLowerCase()
+            if (fromLower === ownLower || toLower !== ownLower) continue
+            const current = newestIncomingByPeer[fromLower]
+            if (!current || message.createdAt > current) {
+              newestIncomingByPeer[fromLower] = message.createdAt
+            }
+          }
+          for (const [peerLower, incomingAt] of Object.entries(newestIncomingByPeer)) {
+            const visibilityAt = peerVisibilityUpdatedAtRef.current[peerLower] ?? '1970-01-01'
+            if (incomingAt <= visibilityAt) continue
+            peerVisibilityUpdatedAtRef.current = {
+              ...peerVisibilityUpdatedAtRef.current,
+              [peerLower]: incomingAt,
+            }
+            setPeerVisibilityUpdatedAt((prev) => {
+              const current = prev[peerLower] ?? '1970-01-01'
+              if (incomingAt <= current) return prev
+              return { ...prev, [peerLower]: incomingAt }
+            })
+            setHiddenPeers((prev) => prev.filter((peer) => peer !== peerLower))
+          }
         }
         if (supabase && upserts.length) {
           await supabase.from('messages').upsert(upserts, {
@@ -1923,7 +1928,7 @@ function App() {
           const sessionClient = abstractClient.toSessionClient(sessionSigner, session)
           hash = await sessionClient.sendTransaction({
             account: sessionClient.account,
-            to: peerLower as Address,
+            to: activePeer as Address,
             chain: abstract,
             data: toHex(payload),
             value: 0n,
@@ -1935,7 +1940,7 @@ function App() {
 
       if (!hash) {
         hash = await abstractClient.sendTransaction({
-          to: peerLower as `0x${string}`,
+          to: activePeer as `0x${string}`,
           data: toHex(payload),
           value: 0n,
         })
