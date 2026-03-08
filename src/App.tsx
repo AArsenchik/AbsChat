@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { useAbstractClient, useLoginWithAbstract, useCreateSession } from '@abstract-foundation/agw-react'
-import { useAccount, usePublicClient } from 'wagmi'
-import { fromHex, isAddress, toHex, parseEther, type Address } from 'viem'
+import { useAccount } from 'wagmi'
+import { isAddress, toHex, parseEther, type Address } from 'viem'
 import { abstract } from 'viem/chains'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import { LimitType, type SessionConfig } from '@abstract-foundation/agw-client/sessions'
@@ -538,7 +538,6 @@ function App() {
   const { address, status } = useAccount()
   const { data: abstractClient } = useAbstractClient()
   const { createSessionAsync, isPending: isCreatingSession } = useCreateSession()
-  const publicClient = usePublicClient({ chainId: abstract.id })
 
   const [peerInput, setPeerInput] = useState('')
   const [activePeer, setActivePeer] = useState('')
@@ -565,8 +564,6 @@ function App() {
   const typingTimeoutsRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const typingSendTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastTypingSentRef = useRef<number>(0)
-  const pollMessagesInFlightRef = useRef(false)
-  const pollIncomingInFlightRef = useRef(false)
   const signalsChannelRef = useRef<
     ReturnType<NonNullable<typeof supabase>['channel']> | null
   >(null)
@@ -1365,170 +1362,20 @@ function App() {
           await ingestMessages([row])
         },
       )
-      .subscribe()
-
-    // Polling for new messages (fallback for Realtime)
-    const pollMessages = async () => {
-      if (pollMessagesInFlightRef.current) return
-      if (document.visibilityState === 'hidden') return
-      pollMessagesInFlightRef.current = true
-      try {
-        const lastCreated = lastMessageTimestampRef.current
-
-        const { data } = await supabaseClient
-          .from('messages')
-          .select('*')
-          .eq('chain_id', abstract.id)
-          .or(`from_address.eq.${addressLower},to_address.eq.${addressLower}`)
-          .gt('created_at', lastCreated)
-          .order('created_at', { ascending: true })
-          .limit(100)
-
-        if (!cancelled && data) {
-          await ingestMessages(data)
+      .subscribe((status) => {
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          channel.unsubscribe()
+          setTimeout(() => {
+            channel.subscribe()
+          }, 600)
         }
-      } catch {
-        // Ignore errors during polling
-      } finally {
-        pollMessagesInFlightRef.current = false
-      }
-    }
-
-    const interval = setInterval(pollMessages, 2000)
+      })
 
     return () => {
       cancelled = true
-      pollMessagesInFlightRef.current = false
       supabaseClient.removeChannel(channel)
-      clearInterval(interval)
     }
   }, [address, ingestMessages])
-
-  useEffect(() => {
-    if (!address || !publicClient) return
-    let cancelled = false
-    const ownLower = address.toLowerCase()
-    const peerSet = new Set(peers.map((peer) => peer.toLowerCase()))
-    const MAX_BLOCKS_PER_POLL = 35n
-
-    const pollIncoming = async () => {
-      if (pollIncomingInFlightRef.current) return
-      if (document.visibilityState === 'hidden') return
-      pollIncomingInFlightRef.current = true
-      try {
-        const latest = await publicClient.getBlockNumber()
-        const start =
-          lastScannedBlock.current ??
-          (latest > 180n ? latest - 180n : 0n)
-        if (start >= latest) {
-          lastScannedBlock.current = latest
-          return
-        }
-        const endBlock = start + MAX_BLOCKS_PER_POLL < latest ? start + MAX_BLOCKS_PER_POLL : latest
-        const discovered: Message[] = []
-        const upserts: Array<{
-          tx_hash: string
-          from_address: string
-          to_address: string
-          text: string
-          created_at: string
-          chain_id: number
-        }> = []
-        for (let blockNumber = start + 1n; blockNumber <= endBlock; blockNumber++) {
-          const block = await publicClient.getBlock({
-            blockNumber,
-            includeTransactions: true,
-          })
-          if (!block.transactions.length) continue
-          const timestamp = new Date(
-            Number(block.timestamp) * 1000,
-          ).toISOString()
-          const incoming = block.transactions.filter(
-            (tx) =>
-              (tx.to?.toLowerCase() === ownLower ||
-                (tx.from.toLowerCase() === tx.to?.toLowerCase() &&
-                  peerSet.has(tx.from.toLowerCase()))) &&
-              tx.input &&
-              tx.input !== '0x',
-          )
-          if (!incoming.length) continue
-          for (const tx of incoming) {
-            let payload = ''
-            try {
-              payload = fromHex(tx.input as `0x${string}`, 'string')
-            } catch {
-              continue
-            }
-            const text = getInitialText(payload)
-            const toAddress = tx.to ?? address
-            discovered.push({
-              id: tx.hash,
-              from: tx.from,
-              to: toAddress,
-              text,
-              payload,
-              createdAt: timestamp,
-              status: 'sent',
-              txHash: tx.hash,
-            })
-            upserts.push({
-              tx_hash: tx.hash,
-              from_address: tx.from.toLowerCase(),
-              to_address: toAddress.toLowerCase(),
-              text: payload,
-              created_at: timestamp,
-              chain_id: abstract.id,
-            })
-          }
-        }
-        if (discovered.length) {
-          const activeLower = activePeerRef.current
-          if (activeLower) {
-            let newest = ''
-            for (const message of discovered) {
-              if (
-                message.from.toLowerCase() === activeLower &&
-                message.to.toLowerCase() === ownLower
-              ) {
-                if (!newest || message.createdAt > newest) {
-                  newest = message.createdAt
-                }
-              }
-            }
-            if (newest) {
-              setLastReadByPeer((prev) => {
-                const current = prev[activeLower] ?? '1970-01-01'
-                if (newest <= current) return prev
-                return { ...prev, [activeLower]: newest }
-              })
-            }
-          }
-          setMessages((prev) => mergeMessages(prev, discovered))
-        }
-        if (supabase && upserts.length) {
-          await supabase.from('messages').upsert(upserts, {
-            onConflict: 'tx_hash',
-          })
-        }
-        if (!cancelled) {
-          lastScannedBlock.current = endBlock
-          setLastSyncBlock(endBlock.toString())
-        }
-      } catch {
-        return
-      } finally {
-        pollIncomingInFlightRef.current = false
-      }
-    }
-
-    const interval = setInterval(pollIncoming, 5000)
-    pollIncoming()
-    return () => {
-      cancelled = true
-      pollIncomingInFlightRef.current = false
-      clearInterval(interval)
-    }
-  }, [address, publicClient, peers])
 
   useEffect(() => {
     const supabaseClient = supabase
@@ -1708,6 +1555,12 @@ function App() {
               deviceId: deviceIdRef.current,
             },
           })
+        }
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          channel.unsubscribe()
+          setTimeout(() => {
+            channel.subscribe()
+          }, 600)
         }
       })
 
