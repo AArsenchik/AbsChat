@@ -565,7 +565,6 @@ function App() {
   const typingTimeoutsRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const typingSendTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastTypingSentRef = useRef<number>(0)
-  const lastMessageHintSentRef = useRef<number>(0)
   const pollMessagesInFlightRef = useRef(false)
   const pollIncomingInFlightRef = useRef(false)
   const signalsChannelRef = useRef<
@@ -1262,32 +1261,6 @@ function App() {
       Object.entries(newestBySender).forEach(([sender, createdAt]) => {
         applyPeerVisibility(sender, false, createdAt)
       })
-
-      const incomingRows = rows.filter(
-        (row) =>
-          row.to_address.toLowerCase() === addressLower &&
-          row.from_address.toLowerCase() !== addressLower,
-      )
-      if (incomingRows.length > 0) {
-        const newestIncoming = incomingRows.reduce((latest, row) =>
-          row.created_at > latest.created_at ? row : latest,
-        )
-        const now = Date.now()
-        if (now - lastMessageHintSentRef.current > 800) {
-          lastMessageHintSentRef.current = now
-          signalsChannelRef.current?.send({
-            type: 'broadcast',
-            event: 'message_hint',
-            payload: {
-              from: addressLower,
-              to: addressLower,
-              deviceId: deviceIdRef.current,
-              txHash: newestIncoming.tx_hash,
-              since: newestIncoming.created_at,
-            },
-          })
-        }
-      }
     },
     [address, applyPeerVisibility],
   )
@@ -1362,27 +1335,34 @@ function App() {
 
     loadHistory()
 
-    // Subscribe to messages globally for this chain
-    // This ensures we catch ALL relevant events without complex filters on the channel
     const channel = supabaseClient
-      .channel('public:messages')
+      .channel(`messages:${addressLower}`)
       .on(
         'postgres_changes',
         {
           event: 'INSERT',
           schema: 'public',
           table: 'messages',
-          filter: `chain_id=eq.${abstract.id}`,
+          filter: `from_address=eq.${addressLower}`,
         },
         async (payload) => {
           const row = payload.new as SupabaseMessage
-          // Filter on client side to ensure we only update state for relevant messages
-          if (
-            row.from_address.toLowerCase() === addressLower ||
-            row.to_address.toLowerCase() === addressLower
-          ) {
+          if (row.chain_id !== abstract.id) return
           await ingestMessages([row])
-          }
+        },
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+          filter: `to_address=eq.${addressLower}`,
+        },
+        async (payload) => {
+          const row = payload.new as SupabaseMessage
+          if (row.chain_id !== abstract.id) return
+          await ingestMessages([row])
         },
       )
       .subscribe()
@@ -1656,20 +1636,6 @@ function App() {
           data.updatedAt ?? new Date().toISOString(),
         )
       })
-      .on('broadcast', { event: 'message_hint' }, (payload) => {
-        const data = payload.payload as {
-          from?: string
-          to?: string
-          deviceId?: string
-          txHash?: string
-          since?: string
-        }
-        if (!data?.from || !data?.to) return
-        if (data.to.toLowerCase() !== addressLower) return
-        if (data.deviceId === deviceIdRef.current) return
-        const since = data.since ?? lastMessageTimestampRef.current
-        void fetchMessageUpdates({ since, txHash: data.txHash })
-      })
       .on('broadcast', { event: 'sync_request' }, (payload) => {
         const data = payload.payload as {
           from?: string
@@ -1749,7 +1715,7 @@ function App() {
       channel.unsubscribe()
       signalsChannelRef.current = null
     }
-  }, [address, applyPeerVisibility, fetchMessageUpdates])
+  }, [address, applyPeerVisibility])
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -2041,27 +2007,6 @@ function App() {
           { onConflict: 'tx_hash' },
         )
       }
-      signalsChannelRef.current?.send({
-        type: 'broadcast',
-        event: 'message_hint',
-        payload: {
-          from: addressLower,
-          to: addressLower,
-          deviceId: deviceIdRef.current,
-          txHash: hash,
-          since: createdAt,
-        },
-      })
-      signalsChannelRef.current?.send({
-        type: 'broadcast',
-        event: 'message_hint',
-        payload: {
-          from: addressLower,
-          to: peerLower,
-          txHash: hash,
-          since: createdAt,
-        },
-      })
     } catch (err) {
       const message = getErrorMessage(err)
       // Check if error is user rejection (4001 or "User rejected")
