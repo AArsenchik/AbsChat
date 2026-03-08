@@ -300,6 +300,9 @@ const MessageList = memo(function MessageList({
 
 const profileNameCache = new Map<string, { value: string | null; ts: number }>()
 const PROFILE_CACHE_TTL = 5 * 60 * 1000
+const PORTAL_BACKOFF_KEY = 'portal-backoff-until'
+const PORTAL_BACKOFF_MS = 5 * 60 * 1000
+const MESSAGE_POLL_OVERLAP_MS = 30 * 60 * 1000
 
 const shorten = (value?: string) => {
   if (!value) return '—'
@@ -340,6 +343,25 @@ const isTransientError = (error: unknown) => {
 }
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+const getPortalBackoffUntil = () => {
+  try {
+    const raw = localStorage.getItem(PORTAL_BACKOFF_KEY)
+    if (!raw) return 0
+    const value = Number(raw)
+    return Number.isFinite(value) ? value : 0
+  } catch {
+    return 0
+  }
+}
+
+const setPortalBackoffUntil = (value: number) => {
+  try {
+    localStorage.setItem(PORTAL_BACKOFF_KEY, String(value))
+  } catch {
+    return
+  }
+}
 
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
@@ -762,8 +784,10 @@ function App() {
     const load = async () => {
       const updates: Record<string, string | null> = {}
       if (document.visibilityState === 'hidden') return
+      if (Date.now() < getPortalBackoffUntil()) return
       const peersToLoad = Array.from(targets).slice(0, 24)
       for (const peerLower of peersToLoad) {
+        if (Date.now() < getPortalBackoffUntil()) break
         const cached = profileNameCache.get(peerLower)
         if (cached) {
           const isFresh = Date.now() - cached.ts < PROFILE_CACHE_TTL
@@ -779,6 +803,10 @@ function App() {
             `/api/portal?address=${encodeURIComponent(peerLower)}`,
             { signal: controller.signal }
           )
+          if (response.status === 403 || response.status === 429) {
+            setPortalBackoffUntil(Date.now() + PORTAL_BACKOFF_MS)
+            break
+          }
           if (!response.ok) {
             profileNameCache.set(peerLower, { value: null, ts: Date.now() })
             updates[peerLower] = null
@@ -1277,15 +1305,21 @@ function App() {
       pollMessagesInFlightRef.current = true
       try {
         const lastCreated = lastMessageTimestampRef.current
+        const lastCreatedMs = Date.parse(lastCreated)
+        const overlapStart = new Date(
+          Number.isFinite(lastCreatedMs)
+            ? Math.max(0, lastCreatedMs - MESSAGE_POLL_OVERLAP_MS)
+            : Date.now() - MESSAGE_POLL_OVERLAP_MS,
+        ).toISOString()
 
         const { data } = await supabaseClient
           .from('messages')
           .select('*')
           .eq('chain_id', abstract.id)
           .or(`from_address.eq.${addressLower},to_address.eq.${addressLower}`)
-          .gt('created_at', lastCreated)
+          .gte('created_at', overlapStart)
           .order('created_at', { ascending: true })
-          .limit(100)
+          .limit(300)
 
         if (!cancelled && data) {
           await processIncomingMessages(data)
