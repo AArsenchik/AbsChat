@@ -1171,61 +1171,61 @@ function App() {
     }
   }, [messages])
 
-  useEffect(() => {
-    const supabaseClient = supabase
-    if (!supabaseClient) return
-    if (!address) return
-    let cancelled = false
-    const addressLower = address.toLowerCase()
-
-    const processIncomingMessages = async (rows: SupabaseMessage[]) => {
-      if (!rows.length) return
-      
-      const mapped = await Promise.all(rows.map(async (row) => {
-        const m = toMessage(row)
-        // Optimistic decryption if key is available and matches current peer
-        const currentKey = conversationKeyRef.current
-        const activePeer = activePeerRef.current
-        
-        if (
-          currentKey && 
-          activePeer && 
-          isEncryptedPayload(m.payload) &&
-          (m.from.toLowerCase() === activePeer || m.to.toLowerCase() === activePeer)
-        ) {
-           const decrypted = await decryptPayloadWithKey(m.payload, currentKey)
-           if (decrypted) m.text = decrypted
+  const applyPeerVisibility = useCallback(
+    (peer: string, hidden: boolean, updatedAt: string) => {
+      const peerLower = peer.toLowerCase()
+      const current = peerVisibilityUpdatedAtRef.current[peerLower] ?? '1970-01-01'
+      if (updatedAt <= current) return
+      peerVisibilityUpdatedAtRef.current = {
+        ...peerVisibilityUpdatedAtRef.current,
+        [peerLower]: updatedAt,
+      }
+      setPeerVisibilityUpdatedAt((prev) => {
+        const existing = prev[peerLower] ?? '1970-01-01'
+        if (updatedAt <= existing) return prev
+        return { ...prev, [peerLower]: updatedAt }
+      })
+      setHiddenPeers((prev) => {
+        if (hidden) {
+          if (prev.includes(peerLower)) return prev
+          return [...prev, peerLower]
         }
-        return m
-      }))
-      
-      if (cancelled) return
+        if (!prev.includes(peerLower)) return prev
+        return prev.filter((p) => p !== peerLower)
+      })
+      if (hidden && activePeerRef.current === peerLower) {
+        setActivePeer('')
+        setPeerInput('')
+      }
+    },
+    [],
+  )
+
+  const ingestMessages = useCallback(
+    async (rows: SupabaseMessage[]) => {
+      if (!rows.length || !address) return
+      const addressLower = address.toLowerCase()
+
+      const mapped = await Promise.all(
+        rows.map(async (row) => {
+          const m = toMessage(row)
+          const currentKey = conversationKeyRef.current
+          const activePeer = activePeerRef.current
+          if (
+            currentKey &&
+            activePeer &&
+            isEncryptedPayload(m.payload) &&
+            (m.from.toLowerCase() === activePeer ||
+              m.to.toLowerCase() === activePeer)
+          ) {
+            const decrypted = await decryptPayloadWithKey(m.payload, currentKey)
+            if (decrypted) m.text = decrypted
+          }
+          return m
+        }),
+      )
+
       setMessages((prev) => mergeMessages(prev, mapped))
-
-      const newestIncomingByPeer: Record<string, string> = {}
-      for (const row of rows) {
-        const fromLower = row.from_address.toLowerCase()
-        const toLower = row.to_address.toLowerCase()
-        if (fromLower === addressLower || toLower !== addressLower) continue
-        const current = newestIncomingByPeer[fromLower]
-        if (!current || row.created_at > current) {
-          newestIncomingByPeer[fromLower] = row.created_at
-        }
-      }
-      for (const [peerLower, incomingAt] of Object.entries(newestIncomingByPeer)) {
-        const visibilityAt = peerVisibilityUpdatedAtRef.current[peerLower] ?? '1970-01-01'
-        if (incomingAt <= visibilityAt) continue
-        peerVisibilityUpdatedAtRef.current = {
-          ...peerVisibilityUpdatedAtRef.current,
-          [peerLower]: incomingAt,
-        }
-        setPeerVisibilityUpdatedAt((prev) => {
-          const current = prev[peerLower] ?? '1970-01-01'
-          if (incomingAt <= current) return prev
-          return { ...prev, [peerLower]: incomingAt }
-        })
-        setHiddenPeers((prev) => prev.filter((peer) => peer !== peerLower))
-      }
 
       const activeLower = activePeerRef.current
       if (activeLower) {
@@ -1248,7 +1248,53 @@ function App() {
           })
         }
       }
-    }
+
+      const newestBySender: Record<string, string> = {}
+      for (const row of rows) {
+        const sender = row.from_address.toLowerCase()
+        if (sender === addressLower) continue
+        const current = newestBySender[sender]
+        if (!current || row.created_at > current) {
+          newestBySender[sender] = row.created_at
+        }
+      }
+      Object.entries(newestBySender).forEach(([sender, createdAt]) => {
+        applyPeerVisibility(sender, false, createdAt)
+      })
+    },
+    [address, applyPeerVisibility],
+  )
+
+  const fetchMessageUpdates = useCallback(
+    async (options: { since?: string; txHash?: string }) => {
+      if (!supabase || !address) return
+      const addressLower = address.toLowerCase()
+      let query = supabase
+        .from('messages')
+        .select('*')
+        .eq('chain_id', abstract.id)
+        .or(`from_address.eq.${addressLower},to_address.eq.${addressLower}`)
+        .order('created_at', { ascending: true })
+        .limit(200)
+      if (options.txHash) {
+        query = query.eq('tx_hash', options.txHash)
+      } else if (options.since) {
+        query = query.gt('created_at', options.since)
+      }
+      const { data } = await query
+      if (data && data.length) {
+        await ingestMessages(data as SupabaseMessage[])
+      }
+    },
+    [address, ingestMessages],
+  )
+
+  useEffect(() => {
+    const supabaseClient = supabase
+    if (!supabaseClient) return
+    if (!address) return
+    let cancelled = false
+    const addressLower = address.toLowerCase()
 
     const loadHistory = async () => {
       try {
@@ -1261,7 +1307,7 @@ function App() {
           .limit(5000)
 
         if (!cancelled && data) {
-          await processIncomingMessages(data)
+          await ingestMessages(data)
         }
       } catch {
         return
@@ -1289,7 +1335,7 @@ function App() {
             row.from_address.toLowerCase() === addressLower ||
             row.to_address.toLowerCase() === addressLower
           ) {
-          await processIncomingMessages([row])
+          await ingestMessages([row])
           }
         },
       )
@@ -1313,7 +1359,7 @@ function App() {
           .limit(100)
 
         if (!cancelled && data) {
-          await processIncomingMessages(data)
+          await ingestMessages(data)
         }
       } catch {
         // Ignore errors during polling
@@ -1322,40 +1368,15 @@ function App() {
       }
     }
 
-    const handleVisibilityChange = () => {
-      if (document.visibilityState !== 'hidden') {
-        void pollMessages()
-      }
-    }
-    document.addEventListener('visibilitychange', handleVisibilityChange)
-
-    const getPollDelay = () => {
-      if (document.visibilityState === 'hidden') return 12000
-      if (activePeerRef.current) return 1200
-      return 3500
-    }
-
-    let timeoutId: ReturnType<typeof setTimeout> | null = null
-    const schedulePoll = () => {
-      timeoutId = setTimeout(async () => {
-        await pollMessages()
-        schedulePoll()
-      }, getPollDelay())
-    }
-
-    void pollMessages()
-    schedulePoll()
+    const interval = setInterval(pollMessages, 8000)
 
     return () => {
       cancelled = true
       pollMessagesInFlightRef.current = false
-      document.removeEventListener('visibilitychange', handleVisibilityChange)
       supabaseClient.removeChannel(channel)
-      if (timeoutId) {
-        clearTimeout(timeoutId)
-      }
+      clearInterval(interval)
     }
-  }, [address])
+  }, [address, ingestMessages])
 
   useEffect(() => {
     if (!address || !publicClient) return
@@ -1457,30 +1478,6 @@ function App() {
             }
           }
           setMessages((prev) => mergeMessages(prev, discovered))
-          const newestIncomingByPeer: Record<string, string> = {}
-          for (const message of discovered) {
-            const fromLower = message.from.toLowerCase()
-            const toLower = message.to.toLowerCase()
-            if (fromLower === ownLower || toLower !== ownLower) continue
-            const current = newestIncomingByPeer[fromLower]
-            if (!current || message.createdAt > current) {
-              newestIncomingByPeer[fromLower] = message.createdAt
-            }
-          }
-          for (const [peerLower, incomingAt] of Object.entries(newestIncomingByPeer)) {
-            const visibilityAt = peerVisibilityUpdatedAtRef.current[peerLower] ?? '1970-01-01'
-            if (incomingAt <= visibilityAt) continue
-            peerVisibilityUpdatedAtRef.current = {
-              ...peerVisibilityUpdatedAtRef.current,
-              [peerLower]: incomingAt,
-            }
-            setPeerVisibilityUpdatedAt((prev) => {
-              const current = prev[peerLower] ?? '1970-01-01'
-              if (incomingAt <= current) return prev
-              return { ...prev, [peerLower]: incomingAt }
-            })
-            setHiddenPeers((prev) => prev.filter((peer) => peer !== peerLower))
-          }
         }
         if (supabase && upserts.length) {
           await supabase.from('messages').upsert(upserts, {
@@ -1506,36 +1503,6 @@ function App() {
       clearInterval(interval)
     }
   }, [address, publicClient, peers])
-
-  const applyPeerVisibility = useCallback(
-    (peer: string, hidden: boolean, updatedAt: string) => {
-      const peerLower = peer.toLowerCase()
-      const current = peerVisibilityUpdatedAtRef.current[peerLower] ?? '1970-01-01'
-      if (updatedAt <= current) return
-      peerVisibilityUpdatedAtRef.current = {
-        ...peerVisibilityUpdatedAtRef.current,
-        [peerLower]: updatedAt,
-      }
-      setPeerVisibilityUpdatedAt((prev) => {
-        const existing = prev[peerLower] ?? '1970-01-01'
-        if (updatedAt <= existing) return prev
-        return { ...prev, [peerLower]: updatedAt }
-      })
-      setHiddenPeers((prev) => {
-        if (hidden) {
-          if (prev.includes(peerLower)) return prev
-          return [...prev, peerLower]
-        }
-        if (!prev.includes(peerLower)) return prev
-        return prev.filter((p) => p !== peerLower)
-      })
-      if (hidden && activePeerRef.current === peerLower) {
-        setActivePeer('')
-        setPeerInput('')
-      }
-    },
-    [],
-  )
 
   useEffect(() => {
     const supabaseClient = supabase
@@ -1643,6 +1610,20 @@ function App() {
           data.updatedAt ?? new Date().toISOString(),
         )
       })
+      .on('broadcast', { event: 'message_hint' }, (payload) => {
+        const data = payload.payload as {
+          from?: string
+          to?: string
+          deviceId?: string
+          txHash?: string
+          since?: string
+        }
+        if (!data?.from || !data?.to) return
+        if (data.to.toLowerCase() !== addressLower) return
+        if (data.deviceId === deviceIdRef.current) return
+        const since = data.since ?? lastMessageTimestampRef.current
+        void fetchMessageUpdates({ since, txHash: data.txHash })
+      })
       .on('broadcast', { event: 'sync_request' }, (payload) => {
         const data = payload.payload as {
           from?: string
@@ -1722,7 +1703,7 @@ function App() {
       channel.unsubscribe()
       signalsChannelRef.current = null
     }
-  }, [address, applyPeerVisibility])
+  }, [address, applyPeerVisibility, fetchMessageUpdates])
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -1925,13 +1906,14 @@ function App() {
       setError(getErrorMessage(err))
       return
     }
+    const createdAt = new Date().toISOString()
     const pending: Message = {
       id: crypto.randomUUID(),
       from: address,
       to: activePeer,
       text,
       payload,
-      createdAt: new Date().toISOString(),
+      createdAt,
       status: 'pending',
     }
     setMessages((prev) => [...prev, pending])
@@ -1959,16 +1941,36 @@ function App() {
             value: 0n,
           })
         } catch (e) {
+          const sessionError = getErrorMessage(e)
+          if (
+            sessionError.toLowerCase().includes('failed to initialize request') ||
+            sessionError.toLowerCase().includes('session')
+          ) {
+            localStorage.removeItem(`session:${addressLower}`)
+            setSessionEnabled(false)
+          }
           console.warn('Session failed, falling back to wallet', e)
         }
       }
 
       if (!hash) {
-        hash = await abstractClient.sendTransaction({
-          to: address as `0x${string}`,
-          data: toHex(payload),
-          value: 0n,
-        })
+        const sendWithWallet = async () =>
+          abstractClient.sendTransaction({
+            to: address as `0x${string}`,
+            data: toHex(payload),
+            value: 0n,
+          })
+        try {
+          hash = await sendWithWallet()
+        } catch (e) {
+          const walletError = getErrorMessage(e)
+          if (walletError.toLowerCase().includes('failed to initialize request')) {
+            await wait(400)
+            hash = await sendWithWallet()
+          } else {
+            throw e
+          }
+        }
       }
 
       setMessages((prev) =>
@@ -1986,13 +1988,24 @@ function App() {
               from_address: addressLower,
               to_address: peerLower,
               text: payload,
-              created_at: new Date().toISOString(),
+              created_at: createdAt,
               chain_id: abstract.id,
             },
           ],
           { onConflict: 'tx_hash' },
         )
       }
+      signalsChannelRef.current?.send({
+        type: 'broadcast',
+        event: 'message_hint',
+        payload: {
+          from: addressLower,
+          to: addressLower,
+          deviceId: deviceIdRef.current,
+          txHash: hash,
+          since: createdAt,
+        },
+      })
     } catch (err) {
       const message = getErrorMessage(err)
       // Check if error is user rejection (4001 or "User rejected")
