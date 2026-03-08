@@ -1923,7 +1923,7 @@ function App() {
           const sessionClient = abstractClient.toSessionClient(sessionSigner, session)
           hash = await sessionClient.sendTransaction({
             account: sessionClient.account,
-            to: address as Address,
+            to: peerLower as Address,
             chain: abstract,
             data: toHex(payload),
             value: 0n,
@@ -1935,7 +1935,7 @@ function App() {
 
       if (!hash) {
         hash = await abstractClient.sendTransaction({
-          to: address as `0x${string}`,
+          to: peerLower as `0x${string}`,
           data: toHex(payload),
           value: 0n,
         })
