@@ -1322,13 +1322,38 @@ function App() {
       }
     }
 
-    const interval = setInterval(pollMessages, 8000)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== 'hidden') {
+        void pollMessages()
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    const getPollDelay = () => {
+      if (document.visibilityState === 'hidden') return 12000
+      if (activePeerRef.current) return 1200
+      return 3500
+    }
+
+    let timeoutId: ReturnType<typeof setTimeout> | null = null
+    const schedulePoll = () => {
+      timeoutId = setTimeout(async () => {
+        await pollMessages()
+        schedulePoll()
+      }, getPollDelay())
+    }
+
+    void pollMessages()
+    schedulePoll()
 
     return () => {
       cancelled = true
       pollMessagesInFlightRef.current = false
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
       supabaseClient.removeChannel(channel)
-      clearInterval(interval)
+      if (timeoutId) {
+        clearTimeout(timeoutId)
+      }
     }
   }, [address])
 
@@ -1928,7 +1953,7 @@ function App() {
           const sessionClient = abstractClient.toSessionClient(sessionSigner, session)
           hash = await sessionClient.sendTransaction({
             account: sessionClient.account,
-            to: activePeer as Address,
+            to: address as Address,
             chain: abstract,
             data: toHex(payload),
             value: 0n,
@@ -1940,7 +1965,7 @@ function App() {
 
       if (!hash) {
         hash = await abstractClient.sendTransaction({
-          to: activePeer as `0x${string}`,
+          to: address as `0x${string}`,
           data: toHex(payload),
           value: 0n,
         })
