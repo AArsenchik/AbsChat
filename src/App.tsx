@@ -327,6 +327,18 @@ const isAbortError = (error: unknown) => {
   return message.includes('abort') || message.includes('aborted')
 }
 
+const isTransientError = (error: unknown) => {
+  if (isAbortError(error)) return true
+  const message = getErrorMessage(error).toLowerCase()
+  return (
+    message.includes('failed to fetch') ||
+    message.includes('network') ||
+    message.includes('timeout') ||
+    message.includes('timed out') ||
+    message.includes('connection')
+  )
+}
+
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 const encoder = new TextEncoder()
@@ -825,7 +837,7 @@ function App() {
       try {
         return await attempt()
       } catch (err) {
-        if (isAbortError(err)) {
+        if (isTransientError(err)) {
           await wait(300)
           return await attempt()
         }
@@ -1439,6 +1451,51 @@ function App() {
           return { ...prev, [peerLower]: readAt }
         })
       })
+      .on('broadcast', { event: 'profile' }, (payload) => {
+        const data = payload.payload as {
+          from?: string
+          to?: string
+          displayName?: string | null
+          avatarUrl?: string | null
+        }
+        if (!data?.from || !data?.to) return
+        if (data.to.toLowerCase() !== addressLower) return
+        const key = data.from.toLowerCase()
+        if (data.displayName !== undefined) {
+          setCustomNames((prev) => ({
+            ...prev,
+            [key]: data.displayName ?? null,
+          }))
+        }
+        if (data.avatarUrl !== undefined) {
+          setCustomAvatars((prev) => ({
+            ...prev,
+            [key]: data.avatarUrl ?? null,
+          }))
+        }
+      })
+      .on('broadcast', { event: 'peer_visibility' }, (payload) => {
+        const data = payload.payload as {
+          from?: string
+          to?: string
+          peer?: string
+          hidden?: boolean
+        }
+        if (!data?.from || !data?.to || !data.peer) return
+        if (data.to.toLowerCase() !== addressLower) return
+        const peerLower = data.peer.toLowerCase()
+        setHiddenPeers((prev) => {
+          if (data.hidden) {
+            if (prev.includes(peerLower)) return prev
+            return [...prev, peerLower]
+          }
+          return prev.filter((p) => p !== peerLower)
+        })
+        if (data.hidden && activePeerRef.current === peerLower) {
+          setActivePeer('')
+          setPeerInput('')
+        }
+      })
       .subscribe()
 
     return () => {
@@ -1483,6 +1540,42 @@ function App() {
     })
   }
 
+  const emitProfileSync = useCallback(
+    (displayName: string | null, avatarUrl: string | null) => {
+      if (!signalsChannelRef.current || !address) return
+      const addressLower = address.toLowerCase()
+      signalsChannelRef.current.send({
+        type: 'broadcast',
+        event: 'profile',
+        payload: {
+          from: addressLower,
+          to: addressLower,
+          displayName,
+          avatarUrl,
+        },
+      })
+    },
+    [address],
+  )
+
+  const emitPeerVisibility = useCallback(
+    (peer: string, hidden: boolean) => {
+      if (!signalsChannelRef.current || !address) return
+      const addressLower = address.toLowerCase()
+      signalsChannelRef.current.send({
+        type: 'broadcast',
+        event: 'peer_visibility',
+        payload: {
+          from: addressLower,
+          to: addressLower,
+          peer,
+          hidden,
+        },
+      })
+    },
+    [address],
+  )
+
   useEffect(() => {
     if (!address || !activePeerValid) return
     emitPresence(true)
@@ -1524,11 +1617,13 @@ function App() {
       'Are you sure you want to remove this contact from the list? History will be preserved.',
     )
     if (!confirmed) return
-    if (activePeer.toLowerCase() === peer.toLowerCase()) {
+    const peerLower = peer.toLowerCase()
+    if (activePeer.toLowerCase() === peerLower) {
       setActivePeer('')
       setPeerInput('')
     }
-    setHiddenPeers((prev) => [...prev, peer.toLowerCase()])
+    setHiddenPeers((prev) => (prev.includes(peerLower) ? prev : [...prev, peerLower]))
+    emitPeerVisibility(peerLower, true)
   }
 
   const handleSetPeer = () => {
@@ -1541,6 +1636,7 @@ function App() {
     setHiddenPeers((prev) => prev.filter((p) => p !== peer))
     setLastReadByPeer((prev) => ({ ...prev, [peer]: new Date().toISOString() }))
     setError(null)
+    emitPeerVisibility(peer, false)
   }
 
   const handleSelectPeer = (peer: string) => {
@@ -1553,6 +1649,7 @@ function App() {
       [peerLower]: new Date().toISOString(),
     }))
     setError(null)
+    emitPeerVisibility(peerLower, false)
   }
 
   const sendMessage = async (overrideText?: string) => {
@@ -1762,6 +1859,8 @@ function App() {
     setProfileError(null)
     setProfileSaving(true)
     const nextName = profileNameDraft.trim()
+    const previousName = customNames[addressLower] ?? null
+    setCustomNames((prev) => ({ ...prev, [addressLower]: nextName || null }))
     try {
       const row = await saveProfile({
         address: addressLower,
@@ -1774,22 +1873,25 @@ function App() {
           ...prev,
           [addressLower]: row.display_name ?? null,
         }))
-        if (row.avatar_url) {
-          setCustomAvatars((prev) => ({
-            ...prev,
-            [addressLower]: row.avatar_url ?? null,
-          }))
-        }
+        setCustomAvatars((prev) => ({
+          ...prev,
+          [addressLower]: row.avatar_url ?? null,
+        }))
       } else {
         setCustomNames((prev) => ({ ...prev, [addressLower]: nextName || null }))
         await loadProfiles([addressLower])
       }
+      emitProfileSync(
+        row?.display_name ?? (nextName || null),
+        row ? row.avatar_url ?? null : customAvatars[addressLower] ?? null,
+      )
       setProfileNameDraft(nextName)
       setProfileEditing(false)
     } catch (err) {
       console.error('Profile save error:', err)
       if (!isAbortError(err)) {
         setProfileError(getErrorMessage(err))
+        setCustomNames((prev) => ({ ...prev, [addressLower]: previousName }))
       }
     } finally {
       setProfileSaving(false)
@@ -1836,6 +1938,10 @@ function App() {
         } else {
           await loadProfiles([addressLower])
         }
+        emitProfileSync(
+          row?.display_name ?? customNames[addressLower] ?? null,
+          row?.avatar_url ?? result,
+        )
       })
       .catch((err) => {
         console.error('Avatar save error:', err)
@@ -2174,7 +2280,7 @@ function App() {
       {profileOpen && (
         <div className="modal">
           <div className="modal__overlay" onClick={() => setProfileOpen(false)} />
-          <div className="modal__content">
+          <div className="modal__content modal__content--profile">
             <div className="modal__header">
               <div className="modal__title">{t.profileTitle}</div>
               <button

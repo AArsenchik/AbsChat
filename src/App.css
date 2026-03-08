@@ -164,6 +164,10 @@ html, body {
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
 }
 
+.modal__content--profile {
+  max-width: 360px;
+}
+
 .modal__header {
   display: flex;
   align-items: center;
@@ -883,6 +887,7 @@ html, body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  border-radius: 16px;
 }
 
 .emoji-btn {
