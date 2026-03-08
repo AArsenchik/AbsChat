@@ -1414,7 +1414,7 @@ function App() {
       }
     }
 
-    const interval = setInterval(pollMessages, 3000)
+    const interval = setInterval(pollMessages, 2000)
 
     return () => {
       cancelled = true
@@ -1541,7 +1541,7 @@ function App() {
       }
     }
 
-    const interval = setInterval(pollIncoming, 7000)
+    const interval = setInterval(pollIncoming, 5000)
     pollIncoming()
     return () => {
       cancelled = true
@@ -2048,6 +2048,16 @@ function App() {
           from: addressLower,
           to: addressLower,
           deviceId: deviceIdRef.current,
+          txHash: hash,
+          since: createdAt,
+        },
+      })
+      signalsChannelRef.current?.send({
+        type: 'broadcast',
+        event: 'message_hint',
+        payload: {
+          from: addressLower,
+          to: peerLower,
           txHash: hash,
           since: createdAt,
         },
