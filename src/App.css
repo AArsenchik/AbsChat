@@ -1,22 +1,22 @@
 :root {
   color-scheme: dark;
-  --bg: #050705;
-  --bg-top: #0a1410;
-  --bg-mid: #060a08;
+  --bg: #050807;
+  --bg-top: #0f1a15;
+  --bg-mid: #0a100d;
   --text: #e9f7ef;
-  --text-muted: rgba(201, 255, 223, 0.7);
-  --surface: rgba(10, 16, 12, 0.88);
-  --surface-strong: rgba(9, 17, 12, 0.82);
-  --surface-soft: rgba(6, 12, 9, 0.7);
-  --border: rgba(66, 190, 120, 0.18);
-  --border-strong: rgba(33, 204, 126, 0.3);
-  --accent: #19f18a;
-  --accent-strong: #18e580;
-  --accent-contrast: #04140b;
-  --shadow-strong: 0 20px 50px rgba(3, 12, 7, 0.6);
-  --shadow-soft: 0 10px 24px rgba(2, 10, 6, 0.35);
+  --text-muted: rgba(205, 226, 214, 0.68);
+  --surface: rgba(255, 255, 255, 0.03);
+  --surface-strong: rgba(255, 255, 255, 0.05);
+  --surface-soft: rgba(255, 255, 255, 0.04);
+  --border: rgba(255, 255, 255, 0.06);
+  --border-strong: rgba(255, 255, 255, 0.12);
+  --accent: #20d98a;
+  --accent-strong: #1fc27f;
+  --accent-contrast: #03110a;
+  --shadow-strong: 0 22px 60px rgba(0, 0, 0, 0.45);
+  --shadow-soft: 0 10px 24px rgba(0, 0, 0, 0.35);
   --glass-blur: 16px;
-  --glass-sat: 150%;
+  --glass-sat: 120%;
 }
 
 
@@ -50,8 +50,8 @@ html, body {
   height: 320px;
   border-radius: 50%;
   filter: blur(0px);
-  opacity: 0.25;
-  background: radial-gradient(circle, rgba(40, 220, 130, 0.35), transparent 70%);
+  opacity: 0.2;
+  background: radial-gradient(circle, rgba(60, 140, 110, 0.25), transparent 70%);
   animation: float 20s ease-in-out infinite;
 }
 
@@ -73,8 +73,8 @@ html, body {
   gap: 24px;
   padding: 18px 22px;
   background: var(--surface-strong);
-  border-radius: 18px;
-  border: 1px solid var(--border);
+  border-radius: 20px;
+  border: none;
   box-shadow: var(--shadow-soft);
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
 }
@@ -105,8 +105,8 @@ html, body {
   height: 36px;
   padding: 0;
   border-radius: 12px;
-  border: 1px solid var(--border-strong);
-  background: var(--surface);
+  border: none;
+  background: var(--surface-soft);
   color: var(--accent);
   cursor: pointer;
   transition: transform 0.25s ease, box-shadow 0.25s ease;
@@ -156,7 +156,7 @@ html, body {
   width: 92%;
   max-width: 720px;
   background: var(--surface-strong);
-  border: 1px solid var(--border);
+  border: none;
   border-radius: 16px;
   box-shadow: var(--shadow-strong);
   padding: 20px;
@@ -214,8 +214,8 @@ html, body {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
+  border: none;
+  border-radius: 16px;
   padding: 12px;
   background: var(--surface);
 }
@@ -279,12 +279,13 @@ html, body {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
+  border: none;
+  border-radius: 16px;
   padding: 12px;
   margin-bottom: 18px;
   background: var(--surface);
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  box-shadow: var(--shadow-soft);
 }
 
 .settings__row + .settings__row {
@@ -316,8 +317,8 @@ html, body {
 }
 .settings__select {
   background: var(--surface-soft);
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  border: none;
+  border-radius: 12px;
   padding: 0 32px 0 12px;
   color: var(--text);
   height: 40px;
@@ -379,15 +380,14 @@ html, body {
   font-size: 12px;
   padding: 6px 12px;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: none;
   background: var(--surface);
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
 }
 
 .pill--on {
   color: var(--accent);
-  border-color: rgba(25, 241, 138, 0.4);
-  box-shadow: 0 0 12px rgba(25, 241, 138, 0.2);
+  box-shadow: 0 0 12px rgba(32, 217, 138, 0.2);
 }
 
 .pill--off {
@@ -419,9 +419,9 @@ html, body {
 }
 
 .btn--ghost {
-  background: var(--surface);
+  background: var(--surface-soft);
   color: var(--accent);
-  border: 1px solid var(--border-strong);
+  border: none;
   box-shadow: none;
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
 }
@@ -434,9 +434,9 @@ html, body {
   align-items: center;
   justify-content: center;
   border-radius: 12px;
-  background: var(--surface);
+  background: var(--surface-soft);
   color: var(--accent);
-  border: 1px solid var(--border-strong);
+  border: none;
   box-shadow: none;
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
 }
@@ -466,7 +466,7 @@ html, body {
 .panel {
   background: var(--surface);
   border-radius: 20px;
-  border: 1px solid var(--border);
+  border: none;
   padding: 20px;
   box-shadow: var(--shadow-strong);
   display: flex;
@@ -479,7 +479,7 @@ html, body {
 
 .panel__title {
   font-size: 15px;
-  color: rgba(190, 255, 220, 0.9);
+  color: rgba(224, 239, 232, 0.88);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -506,20 +506,20 @@ html, body {
 .input,
 .textarea {
   width: 100%;
-  background: var(--surface-soft);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border: none;
+  border-radius: 16px;
+  padding: 14px 16px;
   color: var(--text);
   font-size: 14px;
   outline: none;
-  transition: border 0.25s ease, box-shadow 0.25s ease;
+  transition: box-shadow 0.25s ease, background 0.25s ease;
 }
 
 .input:focus,
 .textarea:focus {
-  border-color: rgba(30, 240, 140, 0.6);
-  box-shadow: 0 0 0 2px rgba(30, 240, 140, 0.15);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12), 0 8px 18px rgba(0, 0, 0, 0.25);
+  background: rgba(255, 255, 255, 0.07);
 }
 
 .textarea {
@@ -546,12 +546,12 @@ html, body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(30, 240, 140, 0.2);
+  background: rgba(255, 255, 255, 0.2);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(30, 240, 140, 0.4);
+  background: rgba(255, 255, 255, 0.35);
 }
 
 .input--compact {
@@ -563,7 +563,7 @@ html, body {
 .peer-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
   overflow-y: auto;
   flex: 1;
   padding-right: 6px;
@@ -589,18 +589,19 @@ html, body {
 }
 
 .peer {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: none;
+  border-radius: 20px;
+  padding: 16px;
   text-align: left;
   color: inherit;
   cursor: pointer;
-  transition: border 0.25s ease, transform 0.25s ease;
+  transition: box-shadow 0.25s ease, transform 0.25s ease;
   overflow: hidden;
   max-width: 100%;
   position: relative;
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
 }
 
 .peer__remove {
@@ -641,8 +642,8 @@ html, body {
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  background: rgba(30, 240, 140, 0.95);
-  color: #0a110d;
+  background: rgba(32, 217, 138, 0.9);
+  color: #04120b;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -654,7 +655,7 @@ html, body {
 .peer__input {
   background: transparent;
   border: none;
-  border-bottom: 1px solid rgba(30, 240, 140, 0.5);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
   color: inherit;
   font-size: 11px;
   width: 100%;
@@ -665,13 +666,12 @@ html, body {
 
 .peer:hover {
   transform: translateY(-1px);
-  border-color: rgba(60, 220, 140, 0.35);
+  box-shadow: 0 12px 26px rgba(0, 0, 0, 0.32);
   z-index: 1;
 }
 
 .peer--active {
-  border-color: rgba(30, 240, 140, 0.7);
-  box-shadow: 0 0 16px rgba(30, 240, 140, 0.18);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(32, 217, 138, 0.2) inset;
   z-index: 2;
 }
 
@@ -739,7 +739,7 @@ html, body {
 
 .chat__typing {
   font-size: 12px;
-  color: var(--accent);
+  color: var(--text-muted);
   min-height: 16px;
 }
 
@@ -750,17 +750,16 @@ html, body {
 .pulse {
   padding: 6px 12px;
   border-radius: 999px;
-  background: var(--surface);
+  background: var(--surface-soft);
   color: var(--accent);
   font-size: 12px;
-  border: 1px solid rgba(24, 240, 138, 0.4);
+  border: none;
   animation: pulse 3s ease-in-out infinite;
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
 }
 
 .pulse--off {
   color: var(--text-muted);
-  border-color: rgba(120, 160, 140, 0.3);
   background: var(--surface-soft);
   animation: none;
 }
@@ -788,13 +787,14 @@ html, body {
   padding: 12px 14px;
   border-radius: 16px;
   background: var(--surface);
-  border: 1px solid var(--border);
+  border: none;
   display: flex;
   flex-direction: column;
   gap: 8px;
   animation: rise 0.35s ease;
   position: relative;
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.22);
 }
 
 .message__remove {
@@ -828,8 +828,7 @@ html, body {
 
 .message--out {
   align-self: flex-end;
-  background: color-mix(in srgb, var(--surface) 80%, rgba(20, 220, 130, 0.18));
-  border-color: rgba(20, 220, 130, 0.35);
+  background: color-mix(in srgb, var(--surface) 88%, rgba(32, 217, 138, 0.12));
 }
 
 .message--in {
@@ -894,8 +893,8 @@ html, body {
   width: 44px;
   height: 44px;
   border-radius: 12px;
-  border: 1px solid var(--border-strong);
-  background: var(--surface);
+  border: none;
+  background: var(--surface-soft);
   color: var(--accent);
   display: inline-flex;
   align-items: center;
@@ -945,7 +944,7 @@ html, body {
   aspect-ratio: 1 / 1;
   object-fit: cover;
   border-radius: 12px;
-  border: 1px solid var(--border);
+  border: none;
   background: var(--surface-soft);
 }
 
@@ -1081,10 +1080,10 @@ html, body {
 
   .panel {
     padding: 14px;
-    border-radius: 0;
+    border-radius: 16px;
     border-left: none;
     border-right: none;
-    box-shadow: none;
+    box-shadow: var(--shadow-soft);
   }
 
   .address {
@@ -1113,7 +1112,7 @@ html, body {
     flex-direction: row;
     align-items: center;
     gap: 10px;
-    background: var(--surface);
+    background: var(--surface-strong);
     padding: 8px 0 10px;
   }
 
@@ -1124,8 +1123,8 @@ html, body {
     width: 36px;
     height: 36px;
     border-radius: 12px;
-    border: 1px solid var(--border-strong);
-    background: var(--surface);
+    border: none;
+    background: var(--surface-soft);
     color: var(--accent);
     cursor: pointer;
   }
@@ -1186,7 +1185,7 @@ html, body {
     position: sticky;
     bottom: 0;
     z-index: 20;
-    background: var(--surface);
+    background: var(--surface-strong);
     padding: 8px 0 calc(8px + env(safe-area-inset-bottom) + var(--keyboard-height, 0px));
   }
 

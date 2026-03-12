@@ -58,10 +58,10 @@ export function AbstractProfile({
   const [fallbackStages, setFallbackStages] = useState<Record<string, number>>({})
   
   const sizeStyles = {
-    sm: { width: '24px', height: '24px' },
-    md: { width: '40px', height: '40px' },
-    lg: { width: '64px', height: '64px' },
-    xl: { width: '120px', height: '120px' },
+    sm: { width: '28px', height: '28px' },
+    md: { width: '48px', height: '48px' },
+    lg: { width: '72px', height: '72px' },
+    xl: { width: '128px', height: '128px' },
   }
 
   const resolvedAddress = (address ?? connectedAddress ?? '').toString()
@@ -80,8 +80,8 @@ export function AbstractProfile({
     (resolvedAddress
       ? resolvedAddress.replace(/^0x/i, '').slice(0, 2).toUpperCase()
       : '')
-  const borderColor = shineColor ?? 'rgba(30, 240, 140, 0.3)'
-  const backgroundColor = shineColor ? 'transparent' : 'rgba(30, 240, 140, 0.1)'
+  const borderColor = shineColor ?? 'rgba(255, 255, 255, 0.12)'
+  const backgroundColor = shineColor ? 'transparent' : 'rgba(255, 255, 255, 0.06)'
 
   useEffect(() => {
     if (!normalizedAddress || src) {
@@ -170,7 +170,7 @@ export function AbstractProfile({
           style={{
             fontSize: size === 'lg' ? '18px' : size === 'sm' ? '10px' : '14px',
             fontWeight: 600,
-            color: shineColor ?? '#1EF08C',
+            color: shineColor ?? 'rgba(233, 247, 239, 0.9)',
             textTransform: 'uppercase',
             lineHeight: 1,
           }}
