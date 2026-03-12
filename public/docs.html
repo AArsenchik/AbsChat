@@ -63,28 +63,30 @@
     <div class="wrap">
       <div class="card">
         <h1>Abstract Messenger — Documentation</h1>
-        <p class="muted">Anonymous, end-to-end encrypted messaging on AbstractChain.</p>
+        <p class="muted">Address-based messaging with client-side encrypted payloads on AbstractChain.</p>
 
         <h2>Overview</h2>
         <p>
-          Abstract Messenger enables private chats using end-to-end encryption. Messages are
-          transmitted as on-chain transactions on AbstractChain, and mirrored to an indexed
-          datastore to enable fast retrieval and cross-device availability.
+          Abstract Messenger enables address-based chats. Messages are transmitted as on-chain
+          transactions on AbstractChain, and mirrored to an indexed datastore to enable fast
+          retrieval and cross-device availability. Payloads are encrypted client-side, but the
+          current key derivation is deterministic and not suitable for sensitive data (see Security Notes).
         </p>
 
         <h2>Key Advantages over Web2</h2>
         <ul class="list">
           <li><strong>Anonymity:</strong> Chats are address-based; no email/phone/SSO.</li>
           <li><strong>Ownership:</strong> Messages are tied to your wallet; no centralized accounts.</li>
-          <li><strong>Security:</strong> Content is encrypted end-to-end using modern crypto (AES‑GCM).</li>
+          <li><strong>Client-side encryption:</strong> Payloads are encrypted with AES‑GCM (see Security Notes).</li>
           <li><strong>Portability:</strong> History can be reconstructed from chain, independent of any single server.</li>
           <li><strong>Transparency:</strong> Message metadata is verifiable; payloads remain unreadable to others.</li>
         </ul>
 
         <h2>How Encryption Works</h2>
         <p>
-          For each conversation, a shared key is derived deterministically from both participants’ addresses.
-          The payload is encrypted using AES‑GCM with a random IV. Only participants can compute the correct key and decrypt.
+          For each conversation, a shared key is currently derived deterministically from both participants’
+          addresses (demo-friendly, not secret). The payload is encrypted using AES‑GCM with a random IV.
+          Anyone who can compute the same deterministic key can decrypt, so this is not strong E2EE.
         </p>
         <ul class="list">
           <li>Key derivation: PBKDF2 + conversation salt (SHA‑256 of sorted addresses).</li>
@@ -122,14 +124,27 @@
 
         <h2>Interface</h2>
         <ul class="list">
-          <li>Liquid-glass visual system with layered blur and neon accents.</li>
+          <li>Soft-surface cards with reduced borders and deeper shadows.</li>
+          <li>Modernized search and composer inputs with rounded geometry.</li>
+          <li>Larger avatars and clearer chat list hierarchy.</li>
           <li>Mobile-friendly layout with stacked panels and touch-ready controls.</li>
         </ul>
 
-        <h2>Privacy Notes</h2>
+        <h2>Recent Updates</h2>
         <ul class="list">
-          <li>Payloads are unreadable without the conversation key.</li>
-          <li>Addresses and timestamps are public on-chain.</li>
+          <li>Refined dark theme with radial background depth and calmer accent usage.</li>
+          <li>Chat cards: increased radius, padding, and glass depth.</li>
+          <li>Input polish: updated search field, composer focus styling, and scrollbar cleanup.</li>
+          <li>Multi-device sync diagnostics: detailed timing logs for realtime, polling, and chain recovery.</li>
+        </ul>
+
+        <h2>Security Notes</h2>
+        <ul class="list">
+          <li>Current key derivation is deterministic from addresses and is not a secret.</li>
+          <li>Payloads are encrypted, but this does not provide strong confidentiality against adversaries.</li>
+          <li>Addresses and timestamps are public on-chain; metadata is always visible.</li>
+          <li>Local storage is used for cached messages and session data; a compromised device can expose history.</li>
+          <li>Supabase policies allow public read/write of encrypted payloads; treat it as public data.</li>
           <li>Consider using fresh addresses for stronger unlinkability.</li>
         </ul>
 
