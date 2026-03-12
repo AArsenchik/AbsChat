@@ -588,6 +588,16 @@ function App() {
   const [hiddenPeers, setHiddenPeers] = useState<string[]>([])
   const [peerVisibilityUpdatedAt, setPeerVisibilityUpdatedAt] = useState<Record<string, string>>({})
 
+  const syncLog = useCallback(
+    (event: string, data?: Record<string, unknown>) => {
+      const stamp = new Date().toISOString()
+      const addr = address ? address.toLowerCase() : ''
+      const deviceId = deviceIdRef.current
+      console.log('[sync]', stamp, event, { address: addr, deviceId, ...data })
+    },
+    [address],
+  )
+
   useEffect(() => {
     conversationKeyRef.current = conversationKey
   }, [conversationKey])
@@ -1202,9 +1212,22 @@ function App() {
   )
 
   const ingestMessages = useCallback(
-    async (rows: SupabaseMessage[]) => {
+    async (rows: SupabaseMessage[], source?: string) => {
       if (!rows.length || !address) return
       const addressLower = address.toLowerCase()
+
+      let oldest = rows[0]?.created_at
+      let newest = rows[0]?.created_at
+      for (const row of rows) {
+        if (!oldest || row.created_at < oldest) oldest = row.created_at
+        if (!newest || row.created_at > newest) newest = row.created_at
+      }
+      syncLog('messages_ingest', {
+        source,
+        count: rows.length,
+        oldest,
+        newest,
+      })
 
       const mapped = await Promise.all(
         rows.map(async (row) => {
@@ -1262,12 +1285,16 @@ function App() {
         applyPeerVisibility(sender, false, createdAt)
       })
     },
-    [address, applyPeerVisibility],
+    [address, applyPeerVisibility, syncLog],
   )
 
   const fetchMessageUpdates = useCallback(
     async (options: { since?: string; txHash?: string }) => {
       if (!supabase || !address) return
+      syncLog('message_fetch', {
+        since: options.since,
+        txHash: options.txHash,
+      })
       const addressLower = address.toLowerCase()
       let query = supabase
         .from('messages')
@@ -1283,10 +1310,10 @@ function App() {
       }
       const { data } = await query
       if (data && data.length) {
-        await ingestMessages(data as SupabaseMessage[])
+        await ingestMessages(data as SupabaseMessage[], 'message_fetch')
       }
     },
-    [address, ingestMessages],
+    [address, ingestMessages, syncLog],
   )
 
   useEffect(() => {
@@ -1307,7 +1334,7 @@ function App() {
           .limit(5000)
 
         if (!cancelled && data) {
-          await ingestMessages(data)
+          await ingestMessages(data, 'history')
         }
       } catch {
         return
@@ -1335,11 +1362,20 @@ function App() {
             row.from_address.toLowerCase() === addressLower ||
             row.to_address.toLowerCase() === addressLower
           ) {
-          await ingestMessages([row])
+          syncLog('realtime_insert', { txHash: row.tx_hash, createdAt: row.created_at })
+          await ingestMessages([row], 'realtime')
           }
         },
       )
-      .subscribe()
+      .subscribe((status, err) => {
+        syncLog('realtime_status', {
+          status,
+          error: err ? getErrorMessage(err) : undefined,
+        })
+        if (status === 'SUBSCRIBED') {
+          pollMessages()
+        }
+      })
 
     // Polling for new messages (fallback for Realtime)
     const pollMessages = async () => {
@@ -1358,7 +1394,7 @@ function App() {
           .limit(100)
 
         if (!cancelled && data) {
-          await ingestMessages(data)
+          await ingestMessages(data, 'poll')
         }
       } catch {
         // Ignore errors during polling
@@ -1367,8 +1403,9 @@ function App() {
       }
     }
 
+    const messageIntervalMs = activePeerValid ? 500 : 1500
     pollMessages()
-    const interval = setInterval(pollMessages, 1000)
+    const interval = setInterval(pollMessages, messageIntervalMs)
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
         pollMessages()
@@ -1385,7 +1422,7 @@ function App() {
       window.removeEventListener('focus', pollMessages)
       document.removeEventListener('visibilitychange', handleVisibility)
     }
-  }, [address, ingestMessages])
+  }, [address, ingestMessages, activePeerValid, syncLog])
 
   useEffect(() => {
     if (!address || !publicClient) return
@@ -1464,6 +1501,17 @@ function App() {
           }
         }
         if (discovered.length) {
+          let oldest = discovered[0]?.createdAt
+          let newest = discovered[0]?.createdAt
+          for (const message of discovered) {
+            if (!oldest || message.createdAt < oldest) oldest = message.createdAt
+            if (!newest || message.createdAt > newest) newest = message.createdAt
+          }
+          syncLog('chain_discovered', {
+            count: discovered.length,
+            oldest,
+            newest,
+          })
           const activeLower = activePeerRef.current
           if (activeLower) {
             let newest = ''
@@ -1491,6 +1539,7 @@ function App() {
           await supabase.from('messages').upsert(upserts, {
             onConflict: 'tx_hash',
           })
+          syncLog('chain_upsert', { count: upserts.length })
         }
         if (!cancelled) {
           lastScannedBlock.current = endBlock
@@ -1503,7 +1552,8 @@ function App() {
       }
     }
 
-    const interval = setInterval(pollIncoming, 2000)
+    const chainIntervalMs = activePeerValid ? 1000 : 3000
+    const interval = setInterval(pollIncoming, chainIntervalMs)
     pollIncoming()
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
@@ -1519,7 +1569,7 @@ function App() {
       window.removeEventListener('focus', pollIncoming)
       document.removeEventListener('visibilitychange', handleVisibility)
     }
-  }, [address, publicClient, peers])
+  }, [address, publicClient, peers, activePeerValid, syncLog])
 
   useEffect(() => {
     const supabaseClient = supabase
@@ -1638,6 +1688,12 @@ function App() {
         if (!data?.from || !data?.to) return
         if (data.to.toLowerCase() !== addressLower) return
         if (data.deviceId === deviceIdRef.current) return
+        syncLog('message_hint_receive', {
+          from: data.from?.toLowerCase(),
+          txHash: data.txHash,
+          since: data.since,
+          deviceId: data.deviceId,
+        })
         const since = data.since ?? lastMessageTimestampRef.current
         void fetchMessageUpdates({ since, txHash: data.txHash })
       })
@@ -1703,6 +1759,7 @@ function App() {
         }
       })
       .subscribe((status) => {
+        syncLog('signals_status', { status })
         if (status === 'SUBSCRIBED') {
           channel.send({
             type: 'broadcast',
@@ -1720,7 +1777,7 @@ function App() {
       channel.unsubscribe()
       signalsChannelRef.current = null
     }
-  }, [address, applyPeerVisibility, fetchMessageUpdates])
+  }, [address, applyPeerVisibility, fetchMessageUpdates, syncLog])
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -1933,6 +1990,7 @@ function App() {
       createdAt,
       status: 'pending',
     }
+    syncLog('send_start', { to: peerLower, createdAt })
     setMessages((prev) => [...prev, pending])
     if (!overrideText) {
       setMessageText('')
@@ -2011,6 +2069,7 @@ function App() {
           ],
           { onConflict: 'tx_hash' },
         )
+        syncLog('send_upsert', { txHash: hash, createdAt })
       }
       signalsChannelRef.current?.send({
         type: 'broadcast',
@@ -2023,8 +2082,10 @@ function App() {
           since: createdAt,
         },
       })
+      syncLog('send_hint', { txHash: hash, createdAt })
     } catch (err) {
       const message = getErrorMessage(err)
+      syncLog('send_error', { error: message })
       // Check if error is user rejection (4001 or "User rejected")
       const isRejection =
         message.toLowerCase().includes('rejected') ||
