@@ -535,6 +535,11 @@ html, body {
   line-height: 1.4;
 }
 
+.textarea--composer:focus {
+  box-shadow: none;
+  background: rgba(255, 255, 255, 0.06);
+}
+
 /* Custom Scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
@@ -1112,7 +1117,7 @@ html, body {
     flex-direction: row;
     align-items: center;
     gap: 10px;
-    background: var(--surface-strong);
+    background: transparent;
     padding: 8px 0 10px;
   }
 
@@ -1185,7 +1190,7 @@ html, body {
     position: sticky;
     bottom: 0;
     z-index: 20;
-    background: var(--surface-strong);
+    background: transparent;
     padding: 8px 0 calc(8px + env(safe-area-inset-bottom) + var(--keyboard-height, 0px));
   }
 
