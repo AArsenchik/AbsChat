@@ -299,7 +299,7 @@ const MessageList = memo(function MessageList({
 })
 
 const profileNameCache = new Map<string, { value: string | null; ts: number }>()
-const PROFILE_CACHE_TTL = 5 * 60 * 1000
+const PROFILE_CACHE_TTL = 24 * 60 * 60 * 1000
 
 const shorten = (value?: string) => {
   if (!value) return '—'

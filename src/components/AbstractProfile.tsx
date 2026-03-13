@@ -12,7 +12,7 @@ interface AbstractProfileProps {
 }
 
 const avatarCache = new Map<string, { value: string | null; ts: number }>()
-const AVATAR_CACHE_TTL = 5 * 60 * 1000
+const AVATAR_CACHE_TTL = 24 * 60 * 60 * 1000
 
 const imageUrlRegex = /https?:\/\/[^"'\s]+?\.(?:png|jpe?g|webp|gif)(?:\?[^"'\s]*)?/i
 
