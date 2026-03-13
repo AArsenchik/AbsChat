@@ -495,16 +495,11 @@ html, body {
   display: flex;
   gap: 10px;
   align-items: center;
-}
-
-.address__actions {
-  display: flex;
-  gap: 10px;
-  flex: 0 0 auto;
+  flex-wrap: nowrap;
 }
 
 .input--address {
-  flex: 1;
+  flex: 1 1 0;
   min-width: 0;
   height: 44px;
 }
@@ -606,7 +601,6 @@ html, body {
 }
 
 .peer {
-  width: 100%;
   background: rgba(255, 255, 255, 0.03);
   border: none;
   border-radius: 20px;
@@ -1107,17 +1101,16 @@ html, body {
   .address {
     flex-direction: row;
     align-items: center;
-    flex-wrap: wrap;
   }
 
   .input--address {
-    flex: 1 1 100%;
+    flex: 1;
     min-width: 0;
   }
 
-  .address__actions {
-    width: 100%;
-    justify-content: flex-end;
+  .address .btn--open,
+  .address .btn--icon {
+    flex: 0 0 auto;
   }
 
   .input--address {

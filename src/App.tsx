@@ -1388,17 +1388,22 @@ function App() {
   }, [messages])
 
   const applyPeerVisibility = useCallback(
-    (peer: string, hidden: boolean, updatedAt: string) => {
+    (
+      peer: string,
+      hidden: boolean,
+      updatedAt: string,
+      options?: { force?: boolean },
+    ) => {
       const peerLower = peer.toLowerCase()
       const current = peerVisibilityUpdatedAtRef.current[peerLower] ?? '1970-01-01'
-      if (updatedAt <= current) return
+      if (!options?.force && updatedAt <= current) return
       peerVisibilityUpdatedAtRef.current = {
         ...peerVisibilityUpdatedAtRef.current,
         [peerLower]: updatedAt,
       }
       setPeerVisibilityUpdatedAt((prev) => {
         const existing = prev[peerLower] ?? '1970-01-01'
-        if (updatedAt <= existing) return prev
+        if (!options?.force && updatedAt <= existing) return prev
         return { ...prev, [peerLower]: updatedAt }
       })
       setHiddenPeers((prev) => {
@@ -1914,6 +1919,7 @@ function App() {
           data.peer,
           Boolean(data.hidden),
           data.updatedAt ?? new Date().toISOString(),
+          { force: true },
         )
       })
       .on('broadcast', { event: 'message_hint' }, (payload) => {
@@ -1988,7 +1994,9 @@ function App() {
         ])
         visibilityPeers.forEach((peer) => {
           const updatedAt = incomingUpdatedAt[peer] ?? '1970-01-01'
-          applyPeerVisibility(peer, incomingHidden.has(peer), updatedAt)
+          applyPeerVisibility(peer, incomingHidden.has(peer), updatedAt, {
+            force: true,
+          })
         })
         if (data.customNames && typeof data.customNames === 'object') {
           setCustomNames((prev) => ({ ...prev, ...data.customNames }))
@@ -2611,71 +2619,69 @@ function App() {
                 if (event.key === 'Enter') handleSetPeer()
               }}
             />
-            <div className="address__actions">
-              <button
-                className="btn btn--icon btn--open"
-                onClick={handleSetPeer}
-                disabled={!peerInputValid}
-                aria-label={t.open}
-                title={t.open}
-              >
+            <button
+              className="btn btn--icon btn--open"
+              onClick={handleSetPeer}
+              disabled={!peerInputValid}
+              aria-label={t.open}
+              title={t.open}
+            >
+              <svg className="btn__icon" viewBox="0 0 24 24" aria-hidden="true">
+                <circle
+                  cx="11"
+                  cy="11"
+                  r="6.5"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                />
+                <path
+                  d="M16.2 16.2l4 4"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </button>
+            <button
+              className="btn btn--icon"
+              onClick={() => setIsEditing(!isEditing)}
+              disabled={peers.length === 0}
+              aria-label={isEditing ? t.save : t.edit}
+              title={isEditing ? t.save : t.edit}
+            >
+              {isEditing ? (
                 <svg className="btn__icon" viewBox="0 0 24 24" aria-hidden="true">
-                  <circle
-                    cx="11"
-                    cy="11"
-                    r="6.5"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                  />
                   <path
-                    d="M16.2 16.2l4 4"
+                    d="M5 12.5l4.5 4.5L19 7.5"
                     fill="none"
                     stroke="currentColor"
                     strokeWidth="2"
                     strokeLinecap="round"
+                    strokeLinejoin="round"
                   />
                 </svg>
-              </button>
-              <button
-                className="btn btn--icon"
-                onClick={() => setIsEditing(!isEditing)}
-                disabled={peers.length === 0}
-                aria-label={isEditing ? t.save : t.edit}
-                title={isEditing ? t.save : t.edit}
-              >
-                {isEditing ? (
-                  <svg className="btn__icon" viewBox="0 0 24 24" aria-hidden="true">
-                    <path
-                      d="M5 12.5l4.5 4.5L19 7.5"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                ) : (
-                  <svg className="btn__icon" viewBox="0 0 24 24" aria-hidden="true">
-                    <path
-                      d="M7 17l3.5-.5L18 9l-3-3-7.5 7.5L7 17z"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.8"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                    <path
-                      d="M13.5 6.5l3 3"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.8"
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                )}
-              </button>
-            </div>
+              ) : (
+                <svg className="btn__icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    d="M7 17l3.5-.5L18 9l-3-3-7.5 7.5L7 17z"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <path
+                    d="M13.5 6.5l3 3"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              )}
+            </button>
           </div>
           <div className="panel__hint">
             {t.hint}

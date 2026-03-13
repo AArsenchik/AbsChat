@@ -70,7 +70,7 @@
           Abstract Messenger enables address-based chats. Messages are transmitted as on-chain
           transactions on AbstractChain, and mirrored to an indexed datastore to enable fast
           retrieval and cross-device availability. Payloads are encrypted client-side with automatic
-          end‑to‑end encryption that requires no user input.
+          E2EE using device keys; a legacy fallback may be used until both sides exchange keys.
         </p>
 
         <h2>Key Advantages over Web2</h2>
@@ -84,15 +84,18 @@
 
         <h2>How Encryption Works</h2>
         <p>
-          Each device generates a local ECDH keypair and derives a shared secret per peer. Messages are
-          encrypted with AES‑GCM using a fresh IV on every send. Public keys are exchanged automatically
-          inside the encrypted payload header to keep the UX frictionless.
+          Each device generates a local ECDH keypair. When two devices exchange public keys, a shared secret
+          is derived and used to encrypt payloads with AES‑GCM. The sender’s public key is included in the
+          payload so recipients can derive the same shared key automatically.
         </p>
         <ul class="list">
-          <li>E2EE: ECDH (P‑256) per device, shared AES‑GCM key per peer.</li>
+          <li>E2EE derivation: ECDH (device keypairs) → shared secret.</li>
           <li>Cipher: AES‑GCM (256‑bit), random IV per message.</li>
-          <li>Prefix v2: <code>enc:v2:&lt;sender_pub&gt;:&lt;iv_base64&gt;:&lt;ciphertext_base64&gt;</code>.</li>
-          <li>Legacy v1 supported for backwards compatibility: <code>enc:v1:&lt;iv&gt;:&lt;ciphertext&gt;[:&lt;sender_pub&gt;]</code>.</li>
+          <li>Prefix (E2EE): <code>enc:v2:&lt;sender_pub&gt;:&lt;iv_base64&gt;:&lt;ciphertext_base64&gt;</code>.</li>
+          <li>
+            Legacy fallback: deterministic PBKDF2 key + conversation salt, encoded as
+            <code>enc:v1:&lt;iv_base64&gt;:&lt;ciphertext_base64&gt;[:sender_pub]</code> until keys are exchanged.
+          </li>
         </ul>
 
         <h2>Realtime and Reliability</h2>
@@ -104,9 +107,9 @@
 
         <h2>Profiles and Identity</h2>
         <ul class="list">
-          <li>Avatars and usernames are pulled from Abstract Portal by wallet address.</li>
-          <li>If no on-chain username is set, a local nickname can be applied.</li>
-          <li>When no nickname exists, the UI falls back to a shortened address.</li>
+          <li>Users set their own display name and avatar directly in the app.</li>
+          <li>Profile updates are stored and synced across devices via the indexed datastore.</li>
+          <li>When no profile is set, the UI falls back to a shortened address.</li>
         </ul>
 
         <h2>Presence and Read Status</h2>
@@ -133,19 +136,21 @@
 
         <h2>Recent Updates</h2>
         <ul class="list">
-          <li>Automatic E2EE with per-device ECDH keys and AES‑GCM encryption.</li>
-          <li>Zero‑input key handling: no manual keys required from users.</li>
-          <li>Backward compatible decryption for legacy encrypted payloads.</li>
+          <li>Refined dark theme with radial background depth and calmer accent usage.</li>
+          <li>Chat cards: increased radius, padding, and glass depth.</li>
+          <li>Input polish: updated search field, composer focus styling, and scrollbar cleanup.</li>
           <li>Multi-device sync diagnostics: detailed timing logs for realtime, polling, and chain recovery.</li>
+          <li>Automatic E2EE handshake with device keys and ECDH-based shared secrets.</li>
         </ul>
 
         <h2>Security Notes</h2>
         <ul class="list">
-          <li>Messages are protected by E2EE using per-device ECDH and AES‑GCM.</li>
-          <li>Private keys never leave the device; only public keys are shared.</li>
-          <li>If a device is compromised, that device’s stored messages and keys can be exposed.</li>
-          <li>Clearing local storage resets the device key and breaks decryption of prior E2EE messages on that device.</li>
-          <li>Encrypted payloads stored in Supabase should be treated as public ciphertext.</li>
+          <li>E2EE keys are stored locally per device; clearing storage can make old E2EE messages unreadable.</li>
+          <li>A compromised device can expose locally cached messages and encryption keys.</li>
+          <li>Legacy v1 derivation is deterministic and not secret; it may appear before E2EE keys are exchanged.</li>
+          <li>Addresses and timestamps are public on-chain; metadata is always visible.</li>
+          <li>Supabase policies allow public read/write of encrypted payloads; treat it as public data.</li>
+          <li>Consider using fresh addresses for stronger unlinkability.</li>
         </ul>
 
         <h2>Getting Started</h2>
