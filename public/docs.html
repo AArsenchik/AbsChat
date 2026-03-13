@@ -69,8 +69,8 @@
         <p>
           Abstract Messenger enables address-based chats. Messages are transmitted as on-chain
           transactions on AbstractChain, and mirrored to an indexed datastore to enable fast
-          retrieval and cross-device availability. Payloads are encrypted client-side, but the
-          current key derivation is deterministic and not suitable for sensitive data (see Security Notes).
+          retrieval and cross-device availability. Payloads are encrypted client-side with automatic
+          end‑to‑end encryption that requires no user input.
         </p>
 
         <h2>Key Advantages over Web2</h2>
@@ -84,14 +84,15 @@
 
         <h2>How Encryption Works</h2>
         <p>
-          For each conversation, a shared key is currently derived deterministically from both participants’
-          addresses (demo-friendly, not secret). The payload is encrypted using AES‑GCM with a random IV.
-          Anyone who can compute the same deterministic key can decrypt, so this is not strong E2EE.
+          Each device generates a local ECDH keypair and derives a shared secret per peer. Messages are
+          encrypted with AES‑GCM using a fresh IV on every send. Public keys are exchanged automatically
+          inside the encrypted payload header to keep the UX frictionless.
         </p>
         <ul class="list">
-          <li>Key derivation: PBKDF2 + conversation salt (SHA‑256 of sorted addresses).</li>
+          <li>E2EE: ECDH (P‑256) per device, shared AES‑GCM key per peer.</li>
           <li>Cipher: AES‑GCM (256‑bit), random IV per message.</li>
-          <li>Prefix: <code>enc:v1:&lt;iv_base64&gt;:&lt;ciphertext_base64&gt;</code> for safe transport.</li>
+          <li>Prefix v2: <code>enc:v2:&lt;sender_pub&gt;:&lt;iv_base64&gt;:&lt;ciphertext_base64&gt;</code>.</li>
+          <li>Legacy v1 supported for backwards compatibility: <code>enc:v1:&lt;iv&gt;:&lt;ciphertext&gt;[:&lt;sender_pub&gt;]</code>.</li>
         </ul>
 
         <h2>Realtime and Reliability</h2>
@@ -132,20 +133,19 @@
 
         <h2>Recent Updates</h2>
         <ul class="list">
-          <li>Refined dark theme with radial background depth and calmer accent usage.</li>
-          <li>Chat cards: increased radius, padding, and glass depth.</li>
-          <li>Input polish: updated search field, composer focus styling, and scrollbar cleanup.</li>
+          <li>Automatic E2EE with per-device ECDH keys and AES‑GCM encryption.</li>
+          <li>Zero‑input key handling: no manual keys required from users.</li>
+          <li>Backward compatible decryption for legacy encrypted payloads.</li>
           <li>Multi-device sync diagnostics: detailed timing logs for realtime, polling, and chain recovery.</li>
         </ul>
 
         <h2>Security Notes</h2>
         <ul class="list">
-          <li>Current key derivation is deterministic from addresses and is not a secret.</li>
-          <li>Payloads are encrypted, but this does not provide strong confidentiality against adversaries.</li>
-          <li>Addresses and timestamps are public on-chain; metadata is always visible.</li>
-          <li>Local storage is used for cached messages and session data; a compromised device can expose history.</li>
-          <li>Supabase policies allow public read/write of encrypted payloads; treat it as public data.</li>
-          <li>Consider using fresh addresses for stronger unlinkability.</li>
+          <li>Messages are protected by E2EE using per-device ECDH and AES‑GCM.</li>
+          <li>Private keys never leave the device; only public keys are shared.</li>
+          <li>If a device is compromised, that device’s stored messages and keys can be exposed.</li>
+          <li>Clearing local storage resets the device key and breaks decryption of prior E2EE messages on that device.</li>
+          <li>Encrypted payloads stored in Supabase should be treated as public ciphertext.</li>
         </ul>
 
         <h2>Getting Started</h2>

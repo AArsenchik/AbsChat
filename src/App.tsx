@@ -2611,69 +2611,71 @@ function App() {
                 if (event.key === 'Enter') handleSetPeer()
               }}
             />
-            <button
-              className="btn btn--icon btn--open"
-              onClick={handleSetPeer}
-              disabled={!peerInputValid}
-              aria-label={t.open}
-              title={t.open}
-            >
-              <svg className="btn__icon" viewBox="0 0 24 24" aria-hidden="true">
-                <circle
-                  cx="11"
-                  cy="11"
-                  r="6.5"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                />
-                <path
-                  d="M16.2 16.2l4 4"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                />
-              </svg>
-            </button>
-            <button
-              className="btn btn--icon"
-              onClick={() => setIsEditing(!isEditing)}
-              disabled={peers.length === 0}
-              aria-label={isEditing ? t.save : t.edit}
-              title={isEditing ? t.save : t.edit}
-            >
-              {isEditing ? (
+            <div className="address__actions">
+              <button
+                className="btn btn--icon btn--open"
+                onClick={handleSetPeer}
+                disabled={!peerInputValid}
+                aria-label={t.open}
+                title={t.open}
+              >
                 <svg className="btn__icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <circle
+                    cx="11"
+                    cy="11"
+                    r="6.5"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  />
                   <path
-                    d="M5 12.5l4.5 4.5L19 7.5"
+                    d="M16.2 16.2l4 4"
                     fill="none"
                     stroke="currentColor"
                     strokeWidth="2"
                     strokeLinecap="round"
-                    strokeLinejoin="round"
                   />
                 </svg>
-              ) : (
-                <svg className="btn__icon" viewBox="0 0 24 24" aria-hidden="true">
-                  <path
-                    d="M7 17l3.5-.5L18 9l-3-3-7.5 7.5L7 17z"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.8"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                  <path
-                    d="M13.5 6.5l3 3"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.8"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              )}
-            </button>
+              </button>
+              <button
+                className="btn btn--icon"
+                onClick={() => setIsEditing(!isEditing)}
+                disabled={peers.length === 0}
+                aria-label={isEditing ? t.save : t.edit}
+                title={isEditing ? t.save : t.edit}
+              >
+                {isEditing ? (
+                  <svg className="btn__icon" viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                      d="M5 12.5l4.5 4.5L19 7.5"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                ) : (
+                  <svg className="btn__icon" viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                      d="M7 17l3.5-.5L18 9l-3-3-7.5 7.5L7 17z"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                    <path
+                      d="M13.5 6.5l3 3"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                )}
+              </button>
+            </div>
           </div>
           <div className="panel__hint">
             {t.hint}
