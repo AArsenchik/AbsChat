@@ -344,6 +344,9 @@ const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
 const ENCRYPTED_PREFIX = 'enc:v1:'
+const ENCRYPTED_V2_PREFIX = 'enc:v2:'
+const E2EE_KEYPAIR_STORAGE_PREFIX = 'abstract-messenger:e2ee-keypair:'
+const E2EE_PEERS_STORAGE_PREFIX = 'abstract-messenger:e2ee-peers:'
 const GIF_PREFIX = 'gif:'
 const GIF_FILES = ['ppp1.mp4', 'ppp2.mp4', 'ppp3.mp4'] as const
 const MAX_AVATAR_BYTES = 512 * 1024
@@ -354,8 +357,34 @@ const toBase64 = (bytes: Uint8Array) =>
   btoa(String.fromCharCode(...Array.from(bytes)))
 const fromBase64 = (value: string) =>
   Uint8Array.from(atob(value), (char) => char.charCodeAt(0))
+const toArrayBuffer = (bytes: Uint8Array) =>
+  bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
 
-const isEncryptedPayload = (payload: string) => payload.startsWith(ENCRYPTED_PREFIX)
+const isEncryptedPayload = (payload: string) =>
+  payload.startsWith(ENCRYPTED_PREFIX) || payload.startsWith(ENCRYPTED_V2_PREFIX)
+
+const parseEncryptedV1Payload = (payload: string) => {
+  if (!payload.startsWith(ENCRYPTED_PREFIX)) return null
+  const raw = payload.slice(ENCRYPTED_PREFIX.length)
+  const [ivBase64, dataBase64, senderPubKey] = raw.split(':')
+  if (!ivBase64 || !dataBase64) return null
+  return { ivBase64, dataBase64, senderPubKey }
+}
+
+const parseEncryptedV2Payload = (payload: string) => {
+  if (!payload.startsWith(ENCRYPTED_V2_PREFIX)) return null
+  const raw = payload.slice(ENCRYPTED_V2_PREFIX.length)
+  const [senderPubKey, ivBase64, dataBase64] = raw.split(':')
+  if (!senderPubKey || !ivBase64 || !dataBase64) return null
+  return { senderPubKey, ivBase64, dataBase64 }
+}
+
+const getSenderPubKeyFromPayload = (payload: string) => {
+  const v2 = parseEncryptedV2Payload(payload)
+  if (v2?.senderPubKey) return v2.senderPubKey
+  const v1 = parseEncryptedV1Payload(payload)
+  return v1?.senderPubKey ?? null
+}
 
 const getDataUrlBytes = (dataUrl: string) => {
   const base64 = dataUrl.split(',')[1] ?? ''
@@ -461,6 +490,7 @@ const encryptPayload = async (
   passphrase: string,
   address: string,
   peer: string,
+  senderPubKey?: string,
 ) => {
   if (!crypto?.subtle) {
     throw new Error('Encryption is not supported in this browser')
@@ -473,7 +503,27 @@ const encryptPayload = async (
     key,
     encoder.encode(text),
   )
-  return `${ENCRYPTED_PREFIX}${toBase64(iv)}:${toBase64(new Uint8Array(encrypted))}`
+  const suffix = senderPubKey ? `:${senderPubKey}` : ''
+  return `${ENCRYPTED_PREFIX}${toBase64(iv)}:${toBase64(new Uint8Array(encrypted))}${suffix}`
+}
+
+const encryptPayloadWithKey = async (
+  text: string,
+  key: CryptoKey,
+  senderPubKey: string,
+) => {
+  if (!crypto?.subtle) {
+    throw new Error('Encryption is not supported in this browser')
+  }
+  const iv = crypto.getRandomValues(new Uint8Array(12))
+  const encrypted = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv },
+    key,
+    encoder.encode(text),
+  )
+  return `${ENCRYPTED_V2_PREFIX}${senderPubKey}:${toBase64(iv)}:${toBase64(
+    new Uint8Array(encrypted),
+  )}`
 }
 
 const decryptPayloadWithKey = async (
@@ -482,19 +532,58 @@ const decryptPayloadWithKey = async (
 ) => {
   if (!isEncryptedPayload(payload)) return payload
   if (!crypto?.subtle) return null
-  const raw = payload.slice(ENCRYPTED_PREFIX.length)
-  const [ivBase64, dataBase64] = raw.split(':')
-  if (!ivBase64 || !dataBase64) return null
+  const parsed = parseEncryptedV1Payload(payload)
+  if (!parsed) return null
   try {
     const decrypted = await crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv: fromBase64(ivBase64) },
+      { name: 'AES-GCM', iv: fromBase64(parsed.ivBase64) },
       key,
-      fromBase64(dataBase64),
+      fromBase64(parsed.dataBase64),
     )
     return decoder.decode(decrypted)
   } catch {
     return null
   }
+}
+
+const decryptPayloadWithSharedKey = async (
+  payload: string,
+  key: CryptoKey
+) => {
+  if (!payload.startsWith(ENCRYPTED_V2_PREFIX)) return null
+  if (!crypto?.subtle) return null
+  const parsed = parseEncryptedV2Payload(payload)
+  if (!parsed) return null
+  try {
+    const decrypted = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: fromBase64(parsed.ivBase64) },
+      key,
+      fromBase64(parsed.dataBase64),
+    )
+    return decoder.decode(decrypted)
+  } catch {
+    return null
+  }
+}
+
+const importE2EEPrivateKey = (key: JsonWebKey) =>
+  crypto.subtle.importKey('jwk', key, { name: 'ECDH', namedCurve: 'P-256' }, false, [
+    'deriveBits',
+  ])
+
+const importE2EEPublicKey = (raw: ArrayBuffer) =>
+  crypto.subtle.importKey('raw', raw, { name: 'ECDH', namedCurve: 'P-256' }, false, [])
+
+const deriveSharedE2EEKey = async (privateKey: CryptoKey, peerPublic: CryptoKey) => {
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'ECDH', public: peerPublic },
+    privateKey,
+    256,
+  )
+  return crypto.subtle.importKey('raw', bits, { name: 'AES-GCM' }, false, [
+    'encrypt',
+    'decrypt',
+  ])
 }
 
 const getInitialText = (payload: string) =>
@@ -556,6 +645,11 @@ function App() {
   const [customAvatars, setCustomAvatars] = useState<Record<string, string | null>>({})
   const [conversationKey, setConversationKey] = useState<CryptoKey | null>(null)
   const conversationKeyRef = useRef<CryptoKey | null>(null)
+  const [devicePublicKey, setDevicePublicKey] = useState<string | null>(null)
+  const devicePrivateKeyRef = useRef<CryptoKey | null>(null)
+  const [peerPublicKeys, setPeerPublicKeys] = useState<Record<string, string>>({})
+  const peerPublicKeysRef = useRef<Record<string, string>>({})
+  const sharedKeysRef = useRef<Record<string, { pub: string; key: CryptoKey }>>({})
   const activePeerRef = useRef<string>('')
   const [lastReadByPeer, setLastReadByPeer] = useState<Record<string, string>>({})
   const [readReceiptsByPeer, setReadReceiptsByPeer] = useState<Record<string, string>>({})
@@ -603,6 +697,92 @@ function App() {
   }, [conversationKey])
 
   useEffect(() => {
+    peerPublicKeysRef.current = peerPublicKeys
+  }, [peerPublicKeys])
+
+  useEffect(() => {
+    sharedKeysRef.current = {}
+  }, [devicePublicKey])
+
+  useEffect(() => {
+    if (!address) {
+      setPeerPublicKeys({})
+      return
+    }
+    const storageKey = `${E2EE_PEERS_STORAGE_PREFIX}${address.toLowerCase()}`
+    try {
+      const raw = localStorage.getItem(storageKey)
+      if (!raw) {
+        setPeerPublicKeys({})
+        return
+      }
+      const parsed = JSON.parse(raw) as Record<string, string>
+      setPeerPublicKeys(parsed ?? {})
+    } catch {
+      setPeerPublicKeys({})
+    }
+  }, [address])
+
+  useEffect(() => {
+    if (!address) return
+    const storageKey = `${E2EE_PEERS_STORAGE_PREFIX}${address.toLowerCase()}`
+    localStorage.setItem(storageKey, JSON.stringify(peerPublicKeys))
+  }, [address, peerPublicKeys])
+
+  useEffect(() => {
+    if (!address) {
+      setDevicePublicKey(null)
+      devicePrivateKeyRef.current = null
+      return
+    }
+    if (!crypto?.subtle) return
+    const storageKey = `${E2EE_KEYPAIR_STORAGE_PREFIX}${address.toLowerCase()}`
+    let cancelled = false
+    const load = async () => {
+      try {
+        const raw = localStorage.getItem(storageKey)
+        if (raw) {
+          const parsed = JSON.parse(raw) as {
+            publicKey: string
+            privateKey: JsonWebKey
+          }
+          const privateKey = await importE2EEPrivateKey(parsed.privateKey)
+          if (cancelled) return
+          devicePrivateKeyRef.current = privateKey
+          setDevicePublicKey(parsed.publicKey)
+          return
+        }
+        const pair = await crypto.subtle.generateKey(
+          { name: 'ECDH', namedCurve: 'P-256' },
+          true,
+          ['deriveBits'],
+        )
+        const publicRaw = new Uint8Array(
+          await crypto.subtle.exportKey('raw', pair.publicKey),
+        )
+        const privateKey = await crypto.subtle.exportKey('jwk', pair.privateKey)
+        const publicKey = toBase64(publicRaw)
+        localStorage.setItem(
+          storageKey,
+          JSON.stringify({ publicKey, privateKey }),
+        )
+        if (cancelled) return
+        devicePrivateKeyRef.current = pair.privateKey
+        setDevicePublicKey(publicKey)
+      } catch {
+        if (!cancelled) {
+          setDevicePublicKey(null)
+          devicePrivateKeyRef.current = null
+        }
+      }
+    }
+    load()
+    return () => {
+      cancelled = true
+    }
+  }, [address])
+
+  useEffect(() => {
     activePeerRef.current = activePeer ? activePeer.toLowerCase() : ''
   }, [activePeer])
 
@@ -621,6 +801,35 @@ function App() {
   useEffect(() => {
     customAvatarsRef.current = customAvatars
   }, [customAvatars])
+
+  const rememberPeerPublicKey = useCallback((peerLower: string, key: string) => {
+    setPeerPublicKeys((prev) => {
+      if (prev[peerLower] === key) return prev
+      return { ...prev, [peerLower]: key }
+    })
+  }, [])
+
+  const getSharedKey = useCallback(
+    async (peerLower: string, peerPubKey: string) => {
+      const cached = sharedKeysRef.current[peerLower]
+      if (cached && cached.pub === peerPubKey) return cached.key
+      const privateKey = devicePrivateKeyRef.current
+      if (!privateKey) return null
+      try {
+        const peerBytes = fromBase64(peerPubKey)
+        const peerPublic = await importE2EEPublicKey(toArrayBuffer(peerBytes))
+        const key = await deriveSharedE2EEKey(privateKey, peerPublic)
+        sharedKeysRef.current = {
+          ...sharedKeysRef.current,
+          [peerLower]: { pub: peerPubKey, key },
+        }
+        return key
+      } catch {
+        return null
+      }
+    },
+    [],
+  )
 
   useEffect(() => {
     const root = document.documentElement
@@ -1071,68 +1280,65 @@ function App() {
   }, [address, activePeer, activePeerValid, chatKeySaved])
 
   useEffect(() => {
-    if (!address) return
-    const key = chatKeySaved.trim()
-    if (!key) {
-      setMessages((prev) =>
-        prev.map((message) =>
-          isEncryptedPayload(message.payload) && message.text !== 'Encrypted message'
-            ? { ...message, text: 'Encrypted message' }
-            : message,
-        ),
-      )
-      return
-    }
-    
-    // If we have a cached key, use it for much faster decryption
-    if (conversationKey) {
-      let cancelled = false
-      const own = address.toLowerCase()
-      const activePeerLower = activePeer.toLowerCase()
+    if (!address || !activePeerValid) return
+    let cancelled = false
+    const own = address.toLowerCase()
+    const activePeerLower = activePeer.toLowerCase()
 
-      const decryptFast = async () => {
-        // Only attempt to decrypt messages that are encrypted, haven't been decrypted yet,
-        // AND belong to the current active conversation
-        const needed = messages
-          .map((m, index) => ({ m, index }))
-          .filter(({ m }) => {
-            if (!isEncryptedPayload(m.payload)) return false
-            if (m.text !== 'Encrypted message') return false
-            const from = m.from.toLowerCase()
-            const to = m.to.toLowerCase()
-            return (
-              (from === own && to === activePeerLower) ||
-              (from === activePeerLower && to === own)
-            )
-          })
+    const decryptFast = async () => {
+      const needed = messages
+        .map((m, index) => ({ m, index }))
+        .filter(({ m }) => {
+          if (!isEncryptedPayload(m.payload)) return false
+          if (m.text !== 'Encrypted message') return false
+          const from = m.from.toLowerCase()
+          const to = m.to.toLowerCase()
+          return (
+            (from === own && to === activePeerLower) ||
+            (from === activePeerLower && to === own)
+          )
+        })
 
-        if (needed.length === 0) return
+      if (needed.length === 0) return
 
-        const updates = [...messages]
-        let changed = false
+      const updates = [...messages]
+      let changed = false
 
-        await Promise.all(
-          needed.map(async ({ m, index }) => {
-            const decrypted = await decryptPayloadWithKey(m.payload, conversationKey)
-            if (decrypted && decrypted !== m.text) {
-              updates[index] = { ...m, text: decrypted }
-              changed = true
+      await Promise.all(
+        needed.map(async ({ m, index }) => {
+          let decrypted: string | null = null
+          if (m.payload.startsWith(ENCRYPTED_V2_PREFIX)) {
+            const parsed = parseEncryptedV2Payload(m.payload)
+            const peerLower =
+              m.from.toLowerCase() === own ? m.to.toLowerCase() : m.from.toLowerCase()
+            const pubKey = parsed?.senderPubKey ?? getSenderPubKeyFromPayload(m.payload)
+            if (pubKey) {
+              const sharedKey = await getSharedKey(peerLower, pubKey)
+              if (sharedKey) {
+                decrypted = await decryptPayloadWithSharedKey(m.payload, sharedKey)
+              }
             }
-          })
-        )
+          }
+          if (!decrypted && conversationKey) {
+            decrypted = await decryptPayloadWithKey(m.payload, conversationKey)
+          }
+          if (decrypted && decrypted !== m.text) {
+            updates[index] = { ...m, text: decrypted }
+            changed = true
+          }
+        }),
+      )
 
-        if (!cancelled && changed) {
-          setMessages(updates)
-        }
+      if (!cancelled && changed) {
+        setMessages(updates)
       }
-      
-      decryptFast()
-      return () => { cancelled = true }
     }
 
-    // Fallback for when conversationKey is not ready (though it should be fast)
-    // Or just skip legacy decryption logic as it's too slow
-  }, [address, chatKeySaved, conversationKey, messages, activePeer])
+    decryptFast()
+    return () => {
+      cancelled = true
+    }
+  }, [address, activePeer, activePeerValid, messages, conversationKey, getSharedKey])
 
   useEffect(() => {
     if (!address) return
@@ -1234,15 +1440,36 @@ function App() {
           const m = toMessage(row)
           const currentKey = conversationKeyRef.current
           const activePeer = activePeerRef.current
+          const senderLower = m.from.toLowerCase()
+          const senderPubKey = getSenderPubKeyFromPayload(m.payload)
+          if (senderPubKey && senderLower !== addressLower) {
+            rememberPeerPublicKey(senderLower, senderPubKey)
+          }
           if (
-            currentKey &&
             activePeer &&
             isEncryptedPayload(m.payload) &&
+            m.text === 'Encrypted message' &&
             (m.from.toLowerCase() === activePeer ||
               m.to.toLowerCase() === activePeer)
           ) {
-            const decrypted = await decryptPayloadWithKey(m.payload, currentKey)
-            if (decrypted) m.text = decrypted
+            if (m.payload.startsWith(ENCRYPTED_V2_PREFIX)) {
+              const parsed = parseEncryptedV2Payload(m.payload)
+              const pubKey = parsed?.senderPubKey ?? senderPubKey
+              const peerLower =
+                senderLower === addressLower ? m.to.toLowerCase() : senderLower
+              if (pubKey) {
+                const sharedKey = await getSharedKey(peerLower, pubKey)
+                if (sharedKey) {
+                  const decrypted = await decryptPayloadWithSharedKey(m.payload, sharedKey)
+                  if (decrypted) m.text = decrypted
+                  return m
+                }
+              }
+            }
+            if (currentKey) {
+              const decrypted = await decryptPayloadWithKey(m.payload, currentKey)
+              if (decrypted) m.text = decrypted
+            }
           }
           return m
         }),
@@ -1285,7 +1512,7 @@ function App() {
         applyPeerVisibility(sender, false, createdAt)
       })
     },
-    [address, applyPeerVisibility, syncLog],
+    [address, applyPeerVisibility, syncLog, rememberPeerPublicKey, getSharedKey],
   )
 
   const fetchMessageUpdates = useCallback(
@@ -1959,10 +2186,6 @@ function App() {
       }
       return
     }
-    if (!chatKeySaved.trim()) {
-      setError('Set a chat key to encrypt messages')
-      return
-    }
     if (!abstractClient) {
       setError('AGW client is not ready yet')
       return
@@ -1974,19 +2197,31 @@ function App() {
     const key = chatKeySaved.trim()
     const addressLower = address.toLowerCase()
     const peerLower = activePeer.toLowerCase()
-    let payload: string
+    let payload: string | null = null
     try {
-      if (conversationKey) {
-        // Use cached key for faster encryption (skips PBKDF2)
-        const iv = crypto.getRandomValues(new Uint8Array(12))
-        const encrypted = await crypto.subtle.encrypt(
-          { name: 'AES-GCM', iv },
-          conversationKey,
-          encoder.encode(text),
-        )
-        payload = `${ENCRYPTED_PREFIX}${toBase64(iv)}:${toBase64(new Uint8Array(encrypted))}`
-      } else {
-        payload = await encryptPayload(text, key, address, activePeer)
+      const senderPubKey = devicePublicKey ?? undefined
+      const peerPubKey = peerPublicKeysRef.current[peerLower]
+      if (senderPubKey && peerPubKey) {
+        const sharedKey = await getSharedKey(peerLower, peerPubKey)
+        if (sharedKey) {
+          payload = await encryptPayloadWithKey(text, sharedKey, senderPubKey)
+        }
+      }
+      if (!payload) {
+        if (conversationKey) {
+          const iv = crypto.getRandomValues(new Uint8Array(12))
+          const encrypted = await crypto.subtle.encrypt(
+            { name: 'AES-GCM', iv },
+            conversationKey,
+            encoder.encode(text),
+          )
+          const suffix = senderPubKey ? `:${senderPubKey}` : ''
+          payload = `${ENCRYPTED_PREFIX}${toBase64(iv)}:${toBase64(
+            new Uint8Array(encrypted),
+          )}${suffix}`
+        } else {
+          payload = await encryptPayload(text, key, address, activePeer, senderPubKey)
+        }
       }
     } catch (err) {
       setError(getErrorMessage(err))
