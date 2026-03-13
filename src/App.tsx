@@ -299,7 +299,7 @@ const MessageList = memo(function MessageList({
 })
 
 const profileNameCache = new Map<string, { value: string | null; ts: number }>()
-const PROFILE_CACHE_TTL = 24 * 60 * 60 * 1000
+const PROFILE_CACHE_TTL = 5 * 60 * 1000
 
 const shorten = (value?: string) => {
   if (!value) return '—'
@@ -1324,20 +1324,29 @@ function App() {
     const addressLower = address.toLowerCase()
 
     const loadHistory = async () => {
+      let offset = 0
+      const batchSize = 1000
+      let total = 0
       try {
-        const { data } = await supabaseClient
-          .from('messages')
-          .select('*')
-          .eq('chain_id', abstract.id)
-          .or(`from_address.eq.${addressLower},to_address.eq.${addressLower}`)
-          .order('created_at', { ascending: true })
-          .limit(5000)
+        while (!cancelled) {
+          const { data, error } = await supabaseClient
+            .from('messages')
+            .select('*')
+            .eq('chain_id', abstract.id)
+            .or(`from_address.eq.${addressLower},to_address.eq.${addressLower}`)
+            .order('created_at', { ascending: true })
+            .range(offset, offset + batchSize - 1)
 
-        if (!cancelled && data) {
+          if (error || !data || data.length === 0) break
           await ingestMessages(data, 'history')
+          total += data.length
+          if (data.length < batchSize) break
+          offset += batchSize
+          await wait(0)
         }
-      } catch {
-        return
+        syncLog('history_loaded', { count: total })
+      } catch (err) {
+        syncLog('history_error', { error: getErrorMessage(err) })
       }
     }
 
@@ -1380,6 +1389,7 @@ function App() {
     // Polling for new messages (fallback for Realtime)
     const pollMessages = async () => {
       if (pollMessagesInFlightRef.current) return
+      if (document.visibilityState === 'hidden') return
       pollMessagesInFlightRef.current = true
       try {
         const lastCreated = lastMessageTimestampRef.current
@@ -1396,8 +1406,8 @@ function App() {
         if (!cancelled && data) {
           await ingestMessages(data, 'poll')
         }
-      } catch {
-        // Ignore errors during polling
+      } catch (err) {
+        syncLog('poll_error', { error: getErrorMessage(err) })
       } finally {
         pollMessagesInFlightRef.current = false
       }
@@ -1433,6 +1443,7 @@ function App() {
 
     const pollIncoming = async () => {
       if (pollIncomingInFlightRef.current) return
+      if (document.visibilityState === 'hidden') return
       pollIncomingInFlightRef.current = true
       try {
         const latest = await publicClient.getBlockNumber()
@@ -1545,7 +1556,8 @@ function App() {
           lastScannedBlock.current = endBlock
           setLastSyncBlock(endBlock.toString())
         }
-      } catch {
+      } catch (err) {
+        syncLog('chain_error', { error: getErrorMessage(err) })
         return
       } finally {
         pollIncomingInFlightRef.current = false

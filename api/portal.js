@@ -23,7 +23,7 @@ export default async function handler(req, res) {
     const contentType = response.headers.get('content-type') ?? 'application/json'
     const buffer = Buffer.from(await response.arrayBuffer())
     res.setHeader('content-type', contentType)
-    res.setHeader('cache-control', 'public, s-maxage=86400, stale-while-revalidate=604800')
+    res.setHeader('cache-control', 's-maxage=60, stale-while-revalidate=300')
     res.status(response.status).send(buffer)
   } catch (error) {
     res.status(502).json({ error: 'Upstream request failed' })
