@@ -37,6 +37,8 @@ type SupabaseProfile = {
   avatar_url: string | null
 }
 
+const MESSAGE_SELECT = 'id,from_address,to_address,text,tx_hash,created_at,chain_id'
+
 const dict = {
   en: {
     brandTitle: 'AbsChat',
@@ -1530,7 +1532,7 @@ function App() {
       const addressLower = address.toLowerCase()
       let query = supabase
         .from('messages')
-        .select('*')
+        .select(MESSAGE_SELECT)
         .eq('chain_id', abstract.id)
         .or(`from_address.eq.${addressLower},to_address.eq.${addressLower}`)
         .order('created_at', { ascending: true })
@@ -1563,7 +1565,7 @@ function App() {
         while (!cancelled) {
           const { data, error } = await supabaseClient
             .from('messages')
-            .select('*')
+            .select(MESSAGE_SELECT)
             .eq('chain_id', abstract.id)
             .or(`from_address.eq.${addressLower},to_address.eq.${addressLower}`)
             .order('created_at', { ascending: true })
@@ -1584,30 +1586,32 @@ function App() {
 
     loadHistory()
 
-    // Subscribe to messages globally for this chain
-    // This ensures we catch ALL relevant events without complex filters on the channel
     const channel = supabaseClient
       .channel('public:messages')
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'messages',
-          filter: `chain_id=eq.${abstract.id}`,
-        },
-        async (payload) => {
-          const row = payload.new as SupabaseMessage
-          // Filter on client side to ensure we only update state for relevant messages
-          if (
-            row.from_address.toLowerCase() === addressLower ||
-            row.to_address.toLowerCase() === addressLower
-          ) {
-          syncLog('realtime_insert', { txHash: row.tx_hash, createdAt: row.created_at })
-          await ingestMessages([row], 'realtime')
-          }
-        },
-      )
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages',
+        filter: `from_address=eq.${addressLower}`,
+      }, async (payload) => {
+        const row = payload.new as SupabaseMessage
+        if (!row) return
+        if (row.chain_id !== abstract.id) return
+        syncLog('realtime_insert', { txHash: row.tx_hash, createdAt: row.created_at })
+        await ingestMessages([row], 'realtime')
+      })
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages',
+        filter: `to_address=eq.${addressLower}`,
+      }, async (payload) => {
+        const row = payload.new as SupabaseMessage
+        if (!row) return
+        if (row.chain_id !== abstract.id) return
+        syncLog('realtime_insert', { txHash: row.tx_hash, createdAt: row.created_at })
+        await ingestMessages([row], 'realtime')
+      })
       .subscribe((status, err) => {
         syncLog('realtime_status', {
           status,
@@ -1628,7 +1632,7 @@ function App() {
 
         const { data } = await supabaseClient
           .from('messages')
-          .select('*')
+          .select(MESSAGE_SELECT)
           .eq('chain_id', abstract.id)
           .or(`from_address.eq.${addressLower},to_address.eq.${addressLower}`)
           .gt('created_at', lastCreated)
@@ -1645,7 +1649,7 @@ function App() {
       }
     }
 
-    const messageIntervalMs = activePeerValid ? 500 : 1500
+    const messageIntervalMs = activePeerValid ? 2000 : 6000
     pollMessages()
     const interval = setInterval(pollMessages, messageIntervalMs)
     const handleVisibility = () => {
