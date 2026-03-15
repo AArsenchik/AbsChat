@@ -37,8 +37,6 @@ type SupabaseProfile = {
   avatar_url: string | null
 }
 
-const MESSAGE_SELECT = 'id,from_address,to_address,text,tx_hash,created_at,chain_id'
-
 const dict = {
   en: {
     brandTitle: 'AbsChat',
@@ -302,6 +300,12 @@ const MessageList = memo(function MessageList({
 
 const profileNameCache = new Map<string, { value: string | null; ts: number }>()
 const PROFILE_CACHE_TTL = 5 * 60 * 1000
+const SUPABASE_PROFILE_CACHE_TTL = 5 * 60 * 1000
+const MESSAGE_FIELDS = 'id, tx_hash, from_address, to_address, text, created_at, chain_id'
+const HISTORY_PAGE_SIZE = 200
+const ACTIVE_CHAT_PAGE_SIZE = 120
+const ACTIVE_CHAT_POLL_MS = 10000
+const GLOBAL_POLL_MS = 45000
 
 const shorten = (value?: string) => {
   if (!value) return '—'
@@ -662,7 +666,11 @@ function App() {
   const typingSendTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastTypingSentRef = useRef<number>(0)
   const pollMessagesInFlightRef = useRef(false)
+  const pollActiveMessagesInFlightRef = useRef(false)
   const pollIncomingInFlightRef = useRef(false)
+  const profileCacheRef = useRef<
+    Record<string, { displayName: string | null; avatarUrl: string | null; ts: number }>
+  >({})
   const signalsChannelRef = useRef<
     ReturnType<NonNullable<typeof supabase>['channel']> | null
   >(null)
@@ -675,6 +683,10 @@ function App() {
   const peerVisibilityUpdatedAtRef = useRef<Record<string, string>>({})
   const customNamesRef = useRef<Record<string, string | null>>({})
   const customAvatarsRef = useRef<Record<string, string | null>>({})
+  const oldestMessageByPeerRef = useRef<Record<string, string>>({})
+  const newestMessageByPeerRef = useRef<Record<string, string>>({})
+  const olderMessagesLoadingRef = useRef<Record<string, boolean>>({})
+  const olderMessagesExhaustedRef = useRef<Record<string, boolean>>({})
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [profileOpen, setProfileOpen] = useState(false)
   const [profileEditing, setProfileEditing] = useState(false)
@@ -866,13 +878,6 @@ function App() {
 
   const chatBodyRef = useRef<HTMLDivElement>(null)
   const shouldAutoScrollRef = useRef<boolean>(true)
-  const handleChatScroll = () => {
-    const el = chatBodyRef.current
-    if (!el) return
-    const threshold = 80
-    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
-    shouldAutoScrollRef.current = distanceFromBottom < threshold
-  }
 
   const connected = status === 'connected' && address
   const peerInputValid = peerInput ? isAddress(peerInput) : false
@@ -1035,10 +1040,34 @@ function App() {
     async (addresses: string[]) => {
       const supabaseClient = supabase
       if (!supabaseClient || addresses.length === 0) return
+      const now = Date.now()
+      const cachedNameUpdates: Record<string, string | null> = {}
+      const cachedAvatarUpdates: Record<string, string | null> = {}
+      const toFetch: string[] = []
+      addresses.forEach((address) => {
+        const key = address.toLowerCase()
+        const cached = profileCacheRef.current[key]
+        if (cached) {
+          const isFresh = now - cached.ts < SUPABASE_PROFILE_CACHE_TTL
+          if (isFresh) {
+            cachedNameUpdates[key] = cached.displayName ?? null
+            cachedAvatarUpdates[key] = cached.avatarUrl ?? null
+            return
+          }
+        }
+        toFetch.push(key)
+      })
+      if (Object.keys(cachedNameUpdates).length > 0) {
+        setCustomNames((prev) => ({ ...prev, ...cachedNameUpdates }))
+      }
+      if (Object.keys(cachedAvatarUpdates).length > 0) {
+        setCustomAvatars((prev) => ({ ...prev, ...cachedAvatarUpdates }))
+      }
+      if (toFetch.length === 0) return
       const { data, error } = await supabaseClient
         .from('profiles')
         .select('address, display_name, avatar_url')
-        .in('address', addresses)
+        .in('address', toFetch)
       if (error) {
         console.error('Profile load error:', error)
         return
@@ -1046,12 +1075,27 @@ function App() {
       if (!data) return
       const nameUpdates: Record<string, string | null> = {}
       const avatarUpdates: Record<string, string | null> = {}
+      const received = new Set<string>()
       data.forEach((row) => {
         const item = row as SupabaseProfile
         if (!item?.address) return
         const key = item.address.toLowerCase()
+        received.add(key)
         nameUpdates[key] = item.display_name ?? null
         avatarUpdates[key] = item.avatar_url ?? null
+        profileCacheRef.current[key] = {
+          displayName: item.display_name ?? null,
+          avatarUrl: item.avatar_url ?? null,
+          ts: now,
+        }
+      })
+      toFetch.forEach((key) => {
+        if (received.has(key)) return
+        profileCacheRef.current[key] = {
+          displayName: null,
+          avatarUrl: null,
+          ts: now,
+        }
       })
       if (Object.keys(nameUpdates).length > 0) {
         setCustomNames((prev) => ({ ...prev, ...nameUpdates }))
@@ -1177,6 +1221,10 @@ function App() {
     if (!address) {
       setMessages([])
       lastScannedBlock.current = null
+      oldestMessageByPeerRef.current = {}
+      newestMessageByPeerRef.current = {}
+      olderMessagesLoadingRef.current = {}
+      olderMessagesExhaustedRef.current = {}
       setProfileNames({})
       setCustomNames({})
       setCustomAvatars({})
@@ -1188,6 +1236,10 @@ function App() {
       if (!raw) {
         setMessages([])
         lastScannedBlock.current = null
+        oldestMessageByPeerRef.current = {}
+        newestMessageByPeerRef.current = {}
+        olderMessagesLoadingRef.current = {}
+        olderMessagesExhaustedRef.current = {}
         setProfileNames({})
         setCustomNames({})
         setCustomAvatars({})
@@ -1428,6 +1480,26 @@ function App() {
     async (rows: SupabaseMessage[], source?: string) => {
       if (!rows.length || !address) return
       const addressLower = address.toLowerCase()
+      for (const row of rows) {
+        const from = row.from_address.toLowerCase()
+        const to = row.to_address.toLowerCase()
+        const peerLower = from === addressLower ? to : from
+        const createdAt = row.created_at
+        const currentOldest = oldestMessageByPeerRef.current[peerLower]
+        const currentNewest = newestMessageByPeerRef.current[peerLower]
+        if (!currentOldest || createdAt < currentOldest) {
+          oldestMessageByPeerRef.current = {
+            ...oldestMessageByPeerRef.current,
+            [peerLower]: createdAt,
+          }
+        }
+        if (!currentNewest || createdAt > currentNewest) {
+          newestMessageByPeerRef.current = {
+            ...newestMessageByPeerRef.current,
+            [peerLower]: createdAt,
+          }
+        }
+      }
 
       let oldest = rows[0]?.created_at
       let newest = rows[0]?.created_at
@@ -1522,6 +1594,69 @@ function App() {
     [address, applyPeerVisibility, syncLog, rememberPeerPublicKey, getSharedKey],
   )
 
+  const loadOlderMessages = useCallback(async () => {
+    if (!supabase || !address || !activePeerValid) return
+    const peerLower = activePeer.toLowerCase()
+    if (olderMessagesLoadingRef.current[peerLower]) return
+    if (olderMessagesExhaustedRef.current[peerLower]) return
+    const oldest = oldestMessageByPeerRef.current[peerLower]
+    if (!oldest) return
+    olderMessagesLoadingRef.current = {
+      ...olderMessagesLoadingRef.current,
+      [peerLower]: true,
+    }
+    const addressLower = address.toLowerCase()
+    const el = chatBodyRef.current
+    const prevHeight = el?.scrollHeight ?? 0
+    try {
+      const { data, error } = await supabase
+        .from('messages')
+        .select(MESSAGE_FIELDS)
+        .eq('chain_id', abstract.id)
+        .or(
+          `and(from_address.eq.${addressLower},to_address.eq.${peerLower}),and(from_address.eq.${peerLower},to_address.eq.${addressLower})`,
+        )
+        .lt('created_at', oldest)
+        .order('created_at', { ascending: false })
+        .limit(ACTIVE_CHAT_PAGE_SIZE)
+      if (error || !data || data.length === 0) {
+        olderMessagesExhaustedRef.current = {
+          ...olderMessagesExhaustedRef.current,
+          [peerLower]: true,
+        }
+        return
+      }
+      await ingestMessages(data as SupabaseMessage[], 'history_page')
+      if (data.length < ACTIVE_CHAT_PAGE_SIZE) {
+        olderMessagesExhaustedRef.current = {
+          ...olderMessagesExhaustedRef.current,
+          [peerLower]: true,
+        }
+      }
+      await wait(0)
+      if (el) {
+        const nextHeight = el.scrollHeight
+        el.scrollTop += Math.max(0, nextHeight - prevHeight)
+      }
+    } finally {
+      olderMessagesLoadingRef.current = {
+        ...olderMessagesLoadingRef.current,
+        [peerLower]: false,
+      }
+    }
+  }, [address, activePeer, activePeerValid, ingestMessages])
+
+  const handleChatScroll = () => {
+    const el = chatBodyRef.current
+    if (!el) return
+    if (el.scrollTop <= 120) {
+      void loadOlderMessages()
+    }
+    const threshold = 80
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+    shouldAutoScrollRef.current = distanceFromBottom < threshold
+  }
+
   const fetchMessageUpdates = useCallback(
     async (options: { since?: string; txHash?: string }) => {
       if (!supabase || !address) return
@@ -1532,11 +1667,11 @@ function App() {
       const addressLower = address.toLowerCase()
       let query = supabase
         .from('messages')
-        .select(MESSAGE_SELECT)
+        .select(MESSAGE_FIELDS)
         .eq('chain_id', abstract.id)
         .or(`from_address.eq.${addressLower},to_address.eq.${addressLower}`)
         .order('created_at', { ascending: true })
-        .limit(200)
+        .limit(120)
       if (options.txHash) {
         query = query.eq('tx_hash', options.txHash)
       } else if (options.since) {
@@ -1558,69 +1693,21 @@ function App() {
     const addressLower = address.toLowerCase()
 
     const loadHistory = async () => {
-      let offset = 0
-      const batchSize = 1000
-      let total = 0
       try {
-        while (!cancelled) {
-          const { data, error } = await supabaseClient
-            .from('messages')
-            .select(MESSAGE_SELECT)
-            .eq('chain_id', abstract.id)
-            .or(`from_address.eq.${addressLower},to_address.eq.${addressLower}`)
-            .order('created_at', { ascending: true })
-            .range(offset, offset + batchSize - 1)
-
-          if (error || !data || data.length === 0) break
-          await ingestMessages(data, 'history')
-          total += data.length
-          if (data.length < batchSize) break
-          offset += batchSize
-          await wait(0)
-        }
-        syncLog('history_loaded', { count: total })
+        const { data, error } = await supabaseClient
+          .from('messages')
+          .select(MESSAGE_FIELDS)
+          .eq('chain_id', abstract.id)
+          .or(`from_address.eq.${addressLower},to_address.eq.${addressLower}`)
+          .order('created_at', { ascending: false })
+          .limit(HISTORY_PAGE_SIZE)
+        if (error || !data) return
+        await ingestMessages(data as SupabaseMessage[], 'history')
+        syncLog('history_loaded', { count: data.length })
       } catch (err) {
         syncLog('history_error', { error: getErrorMessage(err) })
       }
     }
-
-    loadHistory()
-
-    const channel = supabaseClient
-      .channel('public:messages')
-      .on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'messages',
-        filter: `from_address=eq.${addressLower}`,
-      }, async (payload) => {
-        const row = payload.new as SupabaseMessage
-        if (!row) return
-        if (row.chain_id !== abstract.id) return
-        syncLog('realtime_insert', { txHash: row.tx_hash, createdAt: row.created_at })
-        await ingestMessages([row], 'realtime')
-      })
-      .on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'messages',
-        filter: `to_address=eq.${addressLower}`,
-      }, async (payload) => {
-        const row = payload.new as SupabaseMessage
-        if (!row) return
-        if (row.chain_id !== abstract.id) return
-        syncLog('realtime_insert', { txHash: row.tx_hash, createdAt: row.created_at })
-        await ingestMessages([row], 'realtime')
-      })
-      .subscribe((status, err) => {
-        syncLog('realtime_status', {
-          status,
-          error: err ? getErrorMessage(err) : undefined,
-        })
-        if (status === 'SUBSCRIBED') {
-          pollMessages()
-        }
-      })
 
     // Polling for new messages (fallback for Realtime)
     const pollMessages = async () => {
@@ -1632,12 +1719,12 @@ function App() {
 
         const { data } = await supabaseClient
           .from('messages')
-          .select(MESSAGE_SELECT)
+          .select(MESSAGE_FIELDS)
           .eq('chain_id', abstract.id)
           .or(`from_address.eq.${addressLower},to_address.eq.${addressLower}`)
           .gt('created_at', lastCreated)
           .order('created_at', { ascending: true })
-          .limit(100)
+          .limit(80)
 
         if (!cancelled && data) {
           await ingestMessages(data, 'poll')
@@ -1649,9 +1736,9 @@ function App() {
       }
     }
 
-    const messageIntervalMs = activePeerValid ? 2000 : 6000
+    loadHistory()
     pollMessages()
-    const interval = setInterval(pollMessages, messageIntervalMs)
+    const interval = setInterval(pollMessages, GLOBAL_POLL_MS)
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
         pollMessages()
@@ -1663,12 +1750,125 @@ function App() {
     return () => {
       cancelled = true
       pollMessagesInFlightRef.current = false
-      supabaseClient.removeChannel(channel)
       clearInterval(interval)
       window.removeEventListener('focus', pollMessages)
       document.removeEventListener('visibilitychange', handleVisibility)
     }
-  }, [address, ingestMessages, activePeerValid, syncLog])
+  }, [address, ingestMessages, syncLog])
+
+  useEffect(() => {
+    const supabaseClient = supabase
+    if (!supabaseClient || !address || !activePeerValid) return
+    let cancelled = false
+    const addressLower = address.toLowerCase()
+    const peerLower = activePeer.toLowerCase()
+
+    const ensureChatBootstrap = async () => {
+      if (newestMessageByPeerRef.current[peerLower]) return
+      try {
+        const { data, error } = await supabaseClient
+          .from('messages')
+          .select(MESSAGE_FIELDS)
+          .eq('chain_id', abstract.id)
+          .or(
+            `and(from_address.eq.${addressLower},to_address.eq.${peerLower}),and(from_address.eq.${peerLower},to_address.eq.${addressLower})`,
+          )
+          .order('created_at', { ascending: false })
+          .limit(ACTIVE_CHAT_PAGE_SIZE)
+        if (error || !data || cancelled) return
+        await ingestMessages(data as SupabaseMessage[], 'chat_bootstrap')
+      } catch (err) {
+        syncLog('chat_bootstrap_error', { error: getErrorMessage(err) })
+      }
+    }
+
+    const pollActiveMessages = async () => {
+      if (pollActiveMessagesInFlightRef.current) return
+      if (document.visibilityState === 'hidden') return
+      pollActiveMessagesInFlightRef.current = true
+      try {
+        const since = newestMessageByPeerRef.current[peerLower]
+        let query = supabaseClient
+          .from('messages')
+          .select(MESSAGE_FIELDS)
+          .eq('chain_id', abstract.id)
+          .or(
+            `and(from_address.eq.${addressLower},to_address.eq.${peerLower}),and(from_address.eq.${peerLower},to_address.eq.${addressLower})`,
+          )
+          .order('created_at', { ascending: true })
+          .limit(80)
+        if (since) {
+          query = query.gt('created_at', since)
+        }
+        const { data } = await query
+        if (!cancelled && data && data.length) {
+          await ingestMessages(data as SupabaseMessage[], 'chat_poll')
+        }
+      } catch (err) {
+        syncLog('chat_poll_error', { error: getErrorMessage(err) })
+      } finally {
+        pollActiveMessagesInFlightRef.current = false
+      }
+    }
+
+    const channel = supabaseClient
+      .channel(`chat:messages:${addressLower}:${peerLower}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+          filter: `chain_id=eq.${abstract.id},from_address=eq.${addressLower},to_address=eq.${peerLower}`,
+        },
+        async (payload) => {
+          const row = payload.new as SupabaseMessage
+          await ingestMessages([row], 'realtime_active')
+        },
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+          filter: `chain_id=eq.${abstract.id},from_address=eq.${peerLower},to_address=eq.${addressLower}`,
+        },
+        async (payload) => {
+          const row = payload.new as SupabaseMessage
+          await ingestMessages([row], 'realtime_active')
+        },
+      )
+      .subscribe((status, err) => {
+        syncLog('chat_realtime_status', {
+          status,
+          error: err ? getErrorMessage(err) : undefined,
+        })
+        if (status === 'SUBSCRIBED') {
+          pollActiveMessages()
+        }
+      })
+
+    ensureChatBootstrap()
+    pollActiveMessages()
+    const interval = setInterval(pollActiveMessages, ACTIVE_CHAT_POLL_MS)
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        pollActiveMessages()
+      }
+    }
+    window.addEventListener('focus', pollActiveMessages)
+    document.addEventListener('visibilitychange', handleVisibility)
+
+    return () => {
+      cancelled = true
+      pollActiveMessagesInFlightRef.current = false
+      supabaseClient.removeChannel(channel)
+      clearInterval(interval)
+      window.removeEventListener('focus', pollActiveMessages)
+      document.removeEventListener('visibilitychange', handleVisibility)
+    }
+  }, [address, activePeer, activePeerValid, ingestMessages, syncLog])
 
   useEffect(() => {
     if (!address || !publicClient) return
