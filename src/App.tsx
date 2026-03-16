@@ -653,6 +653,7 @@ function App() {
   const conversationKeyRef = useRef<CryptoKey | null>(null)
   const [devicePublicKey, setDevicePublicKey] = useState<string | null>(null)
   const devicePrivateKeyRef = useRef<CryptoKey | null>(null)
+  const devicePrivateKeyJwkRef = useRef<JsonWebKey | null>(null)
   const [peerPublicKeys, setPeerPublicKeys] = useState<Record<string, string>>({})
   const peerPublicKeysRef = useRef<Record<string, string>>({})
   const sharedKeysRef = useRef<Record<string, { pub: string; key: CryptoKey }>>({})
@@ -747,6 +748,7 @@ function App() {
     if (!address) {
       setDevicePublicKey(null)
       devicePrivateKeyRef.current = null
+      devicePrivateKeyJwkRef.current = null
       return
     }
     if (!crypto?.subtle) return
@@ -763,6 +765,7 @@ function App() {
           const privateKey = await importE2EEPrivateKey(parsed.privateKey)
           if (cancelled) return
           devicePrivateKeyRef.current = privateKey
+          devicePrivateKeyJwkRef.current = parsed.privateKey
           setDevicePublicKey(parsed.publicKey)
           return
         }
@@ -782,6 +785,7 @@ function App() {
         )
         if (cancelled) return
         devicePrivateKeyRef.current = pair.privateKey
+        devicePrivateKeyJwkRef.current = privateKey as JsonWebKey
         setDevicePublicKey(publicKey)
       } catch {
         if (!cancelled) {
@@ -2151,11 +2155,19 @@ function App() {
           from?: string
           to?: string
           deviceId?: string
+          requestKeypair?: boolean
         }
         if (!data?.from || !data?.to || !data.deviceId) return
         if (data.to.toLowerCase() !== addressLower) return
         if (data.deviceId === deviceIdRef.current) return
         if (document.visibilityState === 'hidden') return
+        const keypairPayload =
+          data.requestKeypair && devicePublicKey && devicePrivateKeyJwkRef.current
+            ? {
+                publicKey: devicePublicKey,
+                privateKey: devicePrivateKeyJwkRef.current,
+              }
+            : null
         channel.send({
           type: 'broadcast',
           event: 'sync_state',
@@ -2167,6 +2179,8 @@ function App() {
             peerVisibilityUpdatedAt: peerVisibilityUpdatedAtRef.current,
             customNames: customNamesRef.current,
             customAvatars: customAvatarsRef.current,
+            peerPublicKeys: peerPublicKeysRef.current,
+            e2eeKeypair: keypairPayload ?? undefined,
           },
         })
       })
@@ -2179,6 +2193,8 @@ function App() {
           peerVisibilityUpdatedAt?: Record<string, string>
           customNames?: Record<string, string | null>
           customAvatars?: Record<string, string | null>
+          peerPublicKeys?: Record<string, string>
+          e2eeKeypair?: { publicKey?: string; privateKey?: JsonWebKey }
         }
         if (!data?.from || !data?.to || !data.deviceId) return
         if (data.to.toLowerCase() !== addressLower) return
@@ -2208,6 +2224,34 @@ function App() {
         if (data.customAvatars && typeof data.customAvatars === 'object') {
           setCustomAvatars((prev) => ({ ...prev, ...data.customAvatars }))
         }
+        if (data.peerPublicKeys && typeof data.peerPublicKeys === 'object') {
+          setPeerPublicKeys((prev) => ({ ...prev, ...data.peerPublicKeys }))
+        }
+        if (
+          !devicePublicKey &&
+          data.e2eeKeypair?.publicKey &&
+          data.e2eeKeypair?.privateKey
+        ) {
+          const storageKey = `${E2EE_KEYPAIR_STORAGE_PREFIX}${addressLower}`
+          const incoming = {
+            publicKey: data.e2eeKeypair.publicKey,
+            privateKey: data.e2eeKeypair.privateKey,
+          }
+          localStorage.setItem(storageKey, JSON.stringify(incoming))
+          void (async () => {
+            try {
+              const privateKey = await importE2EEPrivateKey(
+                data.e2eeKeypair!.privateKey as JsonWebKey,
+              )
+              devicePrivateKeyRef.current = privateKey
+              devicePrivateKeyJwkRef.current = data.e2eeKeypair!
+                .privateKey as JsonWebKey
+              setDevicePublicKey(data.e2eeKeypair!.publicKey as string)
+            } catch {
+              return
+            }
+          })()
+        }
       })
       .subscribe((status) => {
         syncLog('signals_status', { status })
@@ -2219,6 +2263,7 @@ function App() {
               from: addressLower,
               to: addressLower,
               deviceId: deviceIdRef.current,
+              requestKeypair: !devicePublicKey,
             },
           })
         }
@@ -2228,7 +2273,7 @@ function App() {
       channel.unsubscribe()
       signalsChannelRef.current = null
     }
-  }, [address, applyPeerVisibility, fetchMessageUpdates, syncLog])
+  }, [address, applyPeerVisibility, fetchMessageUpdates, syncLog, devicePublicKey])
 
   useEffect(() => {
     const interval = setInterval(() => {
