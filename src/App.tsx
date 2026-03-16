@@ -1540,7 +1540,15 @@ function App() {
     return () => {
       cancelled = true
     }
-  }, [address, activePeer, activePeerValid, messages, conversationKey, getSharedKey])
+  }, [
+    address,
+    activePeer,
+    activePeerValid,
+    messages,
+    conversationKey,
+    getSharedKey,
+    devicePublicKey,
+  ])
 
   useEffect(() => {
     if (!address) return
