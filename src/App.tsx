@@ -35,6 +35,10 @@ type SupabaseProfile = {
   address: string
   display_name: string | null
   avatar_url: string | null
+  e2ee_public_key?: string | null
+  e2ee_backup?: string | null
+  e2ee_backup_iv?: string | null
+  e2ee_backup_salt?: string | null
 }
 
 const dict = {
@@ -58,11 +62,14 @@ const dict = {
     online: 'Online',
     offline: 'Offline',
     chatEmpty: 'Messages appear here after signing a transaction.',
+    chatEmptySecret: 'Secret chat is empty. Use one shared password.',
     you: 'You',
     awaitSig: 'Awaiting signature',
     txPrefix: 'Tx ',
     sigFailed: 'Signature failed',
     composerPlaceholder: 'Your message...',
+    secretPassphrasePlaceholder: 'Shared password',
+    secretPassphraseSave: 'Save',
     send: 'Send',
     signing: 'Signing…',
     seen: 'Seen',
@@ -101,11 +108,14 @@ const dict = {
     online: '在线',
     offline: '离线',
     chatEmpty: '签名交易后消息会显示在此。',
+    chatEmptySecret: '密聊为空。需要同一密码。',
     you: '你',
     awaitSig: '等待签名',
     txPrefix: '交易 ',
     sigFailed: '签名失败',
     composerPlaceholder: '你的消息…',
+    secretPassphrasePlaceholder: '共享密码',
+    secretPassphraseSave: '保存',
     send: '发送',
     signing: '签名中…',
     seen: '已读',
@@ -144,11 +154,14 @@ const dict = {
     online: '온라인',
     offline: '오프라인',
     chatEmpty: '거래 서명 후 메시지가 표시됩니다.',
+    chatEmptySecret: '비밀 채팅이 비어 있습니다. 공통 비밀번호가 필요합니다.',
     you: '나',
     awaitSig: '서명 대기',
     txPrefix: '트랜잭션 ',
     sigFailed: '서명 실패',
     composerPlaceholder: '메시지…',
+    secretPassphrasePlaceholder: '공유 비밀번호',
+    secretPassphraseSave: '저장',
     send: '보내기',
     signing: '서명 중…',
     seen: '읽음',
@@ -187,11 +200,14 @@ const dict = {
     online: 'オンライン',
     offline: 'オフライン',
     chatEmpty: 'トランザクション署名後に表示されます。',
+    chatEmptySecret: 'シークレットチャットは空です。共通パスワードが必要です。',
     you: 'あなた',
     awaitSig: '署名待ち',
     txPrefix: 'Tx ',
     sigFailed: '署名失敗',
     composerPlaceholder: 'メッセージ…',
+    secretPassphrasePlaceholder: '共有パスワード',
+    secretPassphraseSave: '保存',
     send: '送信',
     signing: '署名中…',
     seen: '既読',
@@ -216,6 +232,7 @@ type MessageListProps = {
   visibleMessages: Message[]
   address: Address | undefined
   activePeer: string
+  activeSecret: boolean
   t: (typeof dict)[keyof typeof dict]
   readReceiptsByPeer: Record<string, string>
   profileNames: Record<string, string | null>
@@ -226,13 +243,18 @@ const MessageList = memo(function MessageList({
   visibleMessages,
   address,
   activePeer,
+  activeSecret,
   t,
   readReceiptsByPeer,
   profileNames,
   handleRemoveMessage,
 }: MessageListProps) {
   if (visibleMessages.length === 0) {
-    return <div className="chat__empty">{t.chatEmpty}</div>
+    return (
+      <div className="chat__empty">
+        {activeSecret ? t.chatEmptySecret : t.chatEmpty}
+      </div>
+    )
   }
 
   return (
@@ -351,10 +373,6 @@ const encoder = new TextEncoder()
 const decoder = new TextDecoder()
 const ENCRYPTED_PREFIX = 'enc:v1:'
 const ENCRYPTED_V2_PREFIX = 'enc:v2:'
-const E2EE_KEYPAIR_STORAGE_PREFIX = 'abstract-messenger:e2ee-keypair:'
-const E2EE_PEERS_STORAGE_PREFIX = 'abstract-messenger:e2ee-peers:'
-const E2EE_BACKUP_TYPE = 'e2ee_key_backup_v1'
-const E2EE_BACKUP_TX_PREFIX = 'e2ee-backup:'
 const GIF_PREFIX = 'gif:'
 const GIF_FILES = ['ppp1.mp4', 'ppp2.mp4', 'ppp3.mp4'] as const
 const MAX_AVATAR_BYTES = 512 * 1024
@@ -365,67 +383,15 @@ const toBase64 = (bytes: Uint8Array) =>
   btoa(String.fromCharCode(...Array.from(bytes)))
 const fromBase64 = (value: string) =>
   Uint8Array.from(atob(value), (char) => char.charCodeAt(0))
-const toArrayBuffer = (bytes: Uint8Array) =>
-  bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
-
 const isEncryptedPayload = (payload: string) =>
   payload.startsWith(ENCRYPTED_PREFIX) || payload.startsWith(ENCRYPTED_V2_PREFIX)
 
 const parseEncryptedV1Payload = (payload: string) => {
   if (!payload.startsWith(ENCRYPTED_PREFIX)) return null
   const raw = payload.slice(ENCRYPTED_PREFIX.length)
-  const [ivBase64, dataBase64, senderPubKey] = raw.split(':')
+  const [ivBase64, dataBase64] = raw.split(':')
   if (!ivBase64 || !dataBase64) return null
-  return { ivBase64, dataBase64, senderPubKey }
-}
-
-const getE2EEBackupTxHash = (addressLower: string) =>
-  `${E2EE_BACKUP_TX_PREFIX}${addressLower}`
-
-const buildSelfBackupKey = async (addressLower: string) => {
-  const salt = await getConversationSalt(addressLower, addressLower)
-  return deriveKey(addressLower, salt)
-}
-
-const parseE2EEBackupData = (
-  value: string,
-): { type: string; publicKey: string; privateKey: JsonWebKey } | null => {
-  try {
-    const parsed = JSON.parse(value) as {
-      type?: string
-      publicKey?: string
-      privateKey?: JsonWebKey
-    }
-    if (
-      parsed?.type === E2EE_BACKUP_TYPE &&
-      typeof parsed.publicKey === 'string' &&
-      parsed.privateKey
-    ) {
-      return {
-        type: parsed.type,
-        publicKey: parsed.publicKey,
-        privateKey: parsed.privateKey,
-      }
-    }
-  } catch {
-    return null
-  }
-  return null
-}
-
-const parseEncryptedV2Payload = (payload: string) => {
-  if (!payload.startsWith(ENCRYPTED_V2_PREFIX)) return null
-  const raw = payload.slice(ENCRYPTED_V2_PREFIX.length)
-  const [senderPubKey, ivBase64, dataBase64] = raw.split(':')
-  if (!senderPubKey || !ivBase64 || !dataBase64) return null
-  return { senderPubKey, ivBase64, dataBase64 }
-}
-
-const getSenderPubKeyFromPayload = (payload: string) => {
-  const v2 = parseEncryptedV2Payload(payload)
-  if (v2?.senderPubKey) return v2.senderPubKey
-  const v1 = parseEncryptedV1Payload(payload)
-  return v1?.senderPubKey ?? null
+  return { ivBase64, dataBase64 }
 }
 
 const getDataUrlBytes = (dataUrl: string) => {
@@ -532,7 +498,6 @@ const encryptPayload = async (
   passphrase: string,
   address: string,
   peer: string,
-  senderPubKey?: string,
 ) => {
   if (!crypto?.subtle) {
     throw new Error('Encryption is not supported in this browser')
@@ -545,27 +510,7 @@ const encryptPayload = async (
     key,
     encoder.encode(text),
   )
-  const suffix = senderPubKey ? `:${senderPubKey}` : ''
-  return `${ENCRYPTED_PREFIX}${toBase64(iv)}:${toBase64(new Uint8Array(encrypted))}${suffix}`
-}
-
-const encryptPayloadWithKey = async (
-  text: string,
-  key: CryptoKey,
-  senderPubKey: string,
-) => {
-  if (!crypto?.subtle) {
-    throw new Error('Encryption is not supported in this browser')
-  }
-  const iv = crypto.getRandomValues(new Uint8Array(12))
-  const encrypted = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv },
-    key,
-    encoder.encode(text),
-  )
-  return `${ENCRYPTED_V2_PREFIX}${senderPubKey}:${toBase64(iv)}:${toBase64(
-    new Uint8Array(encrypted),
-  )}`
+  return `${ENCRYPTED_PREFIX}${toBase64(iv)}:${toBase64(new Uint8Array(encrypted))}`
 }
 
 const decryptPayloadWithKey = async (
@@ -588,45 +533,6 @@ const decryptPayloadWithKey = async (
   }
 }
 
-const decryptPayloadWithSharedKey = async (
-  payload: string,
-  key: CryptoKey
-) => {
-  if (!payload.startsWith(ENCRYPTED_V2_PREFIX)) return null
-  if (!crypto?.subtle) return null
-  const parsed = parseEncryptedV2Payload(payload)
-  if (!parsed) return null
-  try {
-    const decrypted = await crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv: fromBase64(parsed.ivBase64) },
-      key,
-      fromBase64(parsed.dataBase64),
-    )
-    return decoder.decode(decrypted)
-  } catch {
-    return null
-  }
-}
-
-const importE2EEPrivateKey = (key: JsonWebKey) =>
-  crypto.subtle.importKey('jwk', key, { name: 'ECDH', namedCurve: 'P-256' }, false, [
-    'deriveBits',
-  ])
-
-const importE2EEPublicKey = (raw: ArrayBuffer) =>
-  crypto.subtle.importKey('raw', raw, { name: 'ECDH', namedCurve: 'P-256' }, false, [])
-
-const deriveSharedE2EEKey = async (privateKey: CryptoKey, peerPublic: CryptoKey) => {
-  const bits = await crypto.subtle.deriveBits(
-    { name: 'ECDH', public: peerPublic },
-    privateKey,
-    256,
-  )
-  return crypto.subtle.importKey('raw', bits, { name: 'AES-GCM' }, false, [
-    'encrypt',
-    'decrypt',
-  ])
-}
 
 const getInitialText = (payload: string) =>
   isEncryptedPayload(payload) ? 'Encrypted message' : payload
@@ -687,13 +593,12 @@ function App() {
   const [customAvatars, setCustomAvatars] = useState<Record<string, string | null>>({})
   const [conversationKey, setConversationKey] = useState<CryptoKey | null>(null)
   const conversationKeyRef = useRef<CryptoKey | null>(null)
-  const [devicePublicKey, setDevicePublicKey] = useState<string | null>(null)
-  const devicePrivateKeyRef = useRef<CryptoKey | null>(null)
-  const devicePrivateKeyJwkRef = useRef<JsonWebKey | null>(null)
-  const [peerPublicKeys, setPeerPublicKeys] = useState<Record<string, string>>({})
-  const peerPublicKeysRef = useRef<Record<string, string>>({})
-  const sharedKeysRef = useRef<Record<string, { pub: string; key: CryptoKey }>>({})
+  const [activeSecret, setActiveSecret] = useState(false)
+  const [secretPeers, setSecretPeers] = useState<Record<string, string>>({})
+  const [secretPassphrases, setSecretPassphrases] = useState<Record<string, string>>({})
+  const [secretPassphraseDraft, setSecretPassphraseDraft] = useState('')
   const activePeerRef = useRef<string>('')
+  const activeSecretRef = useRef<boolean>(false)
   const [lastReadByPeer, setLastReadByPeer] = useState<Record<string, string>>({})
   const [readReceiptsByPeer, setReadReceiptsByPeer] = useState<Record<string, string>>({})
   const [typingPeers, setTypingPeers] = useState<Record<string, boolean>>({})
@@ -724,6 +629,9 @@ function App() {
   const newestMessageByPeerRef = useRef<Record<string, string>>({})
   const olderMessagesLoadingRef = useRef<Record<string, boolean>>({})
   const olderMessagesExhaustedRef = useRef<Record<string, boolean>>({})
+  const secretChatsChannelRef = useRef<
+    ReturnType<NonNullable<typeof supabase>['channel']> | null
+  >(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [profileOpen, setProfileOpen] = useState(false)
   const [profileEditing, setProfileEditing] = useState(false)
@@ -743,210 +651,214 @@ function App() {
     [address],
   )
 
+  const loadSecretChats = useCallback(
+    async (addressLower: string) => {
+      if (!supabase) return
+      try {
+        const { data, error } = await supabase
+          .from('secret_chats')
+          .select('address_a, address_b, created_at, chain_id')
+          .eq('chain_id', abstract.id)
+          .or(`address_a.eq.${addressLower},address_b.eq.${addressLower}`)
+        if (error || !data) return
+        const next: Record<string, string> = {}
+        data.forEach((row) => {
+          const item = row as {
+            address_a: string
+            address_b: string
+            created_at: string
+          }
+          const peerLower =
+            item.address_a.toLowerCase() === addressLower
+              ? item.address_b.toLowerCase()
+              : item.address_a.toLowerCase()
+          next[peerLower] = item.created_at
+        })
+        setSecretPeers(next)
+      } catch {
+        return
+      }
+    },
+    [],
+  )
+
+  const handleCreateSecretChat = useCallback(
+    async (peerLower: string) => {
+      if (!supabase || !address) return
+      const addressLower = address.toLowerCase()
+      const [addressA, addressB] = [addressLower, peerLower].sort()
+      const createdAt = new Date().toISOString()
+      try {
+        await supabase
+          .from('secret_chats')
+          .upsert(
+            [
+              {
+                address_a: addressA,
+                address_b: addressB,
+                chain_id: abstract.id,
+                created_at: createdAt,
+                created_by: addressLower,
+              },
+            ],
+            { onConflict: 'address_a,address_b,chain_id' },
+          )
+        setSecretPeers((prev) => ({ ...prev, [peerLower]: createdAt }))
+        syncLog('secret_chat_create', { peer: peerLower })
+      } catch (err) {
+        syncLog('secret_chat_create_error', { error: getErrorMessage(err) })
+      }
+    },
+    [address, syncLog],
+  )
+
+  const handleRemoveSecretChat = useCallback(
+    async (peerLower: string) => {
+      if (!supabase || !address) return
+      const addressLower = address.toLowerCase()
+      const [addressA, addressB] = [addressLower, peerLower].sort()
+      try {
+        await supabase
+          .from('secret_chats')
+          .delete()
+          .eq('address_a', addressA)
+          .eq('address_b', addressB)
+          .eq('chain_id', abstract.id)
+        setSecretPeers((prev) => {
+          const next = { ...prev }
+          delete next[peerLower]
+          return next
+        })
+        if (activeSecret && activePeer.toLowerCase() === peerLower) {
+          setActiveSecret(false)
+        }
+        syncLog('secret_chat_remove', { peer: peerLower })
+      } catch (err) {
+        syncLog('secret_chat_remove_error', { error: getErrorMessage(err) })
+      }
+    },
+    [address, activePeer, activeSecret, syncLog],
+  )
+
   useEffect(() => {
     conversationKeyRef.current = conversationKey
   }, [conversationKey])
 
   useEffect(() => {
-    peerPublicKeysRef.current = peerPublicKeys
-  }, [peerPublicKeys])
-
-  useEffect(() => {
-    sharedKeysRef.current = {}
-  }, [devicePublicKey])
-
-  useEffect(() => {
-    if (!address) {
-      setPeerPublicKeys({})
-      return
-    }
-    const storageKey = `${E2EE_PEERS_STORAGE_PREFIX}${address.toLowerCase()}`
-    try {
-      const raw = localStorage.getItem(storageKey)
-      if (!raw) {
-        setPeerPublicKeys({})
-        return
-      }
-      const parsed = JSON.parse(raw) as Record<string, string>
-      setPeerPublicKeys(parsed ?? {})
-    } catch {
-      setPeerPublicKeys({})
-    }
-  }, [address])
-
-  useEffect(() => {
-    if (!address) return
-    const storageKey = `${E2EE_PEERS_STORAGE_PREFIX}${address.toLowerCase()}`
-    localStorage.setItem(storageKey, JSON.stringify(peerPublicKeys))
-  }, [address, peerPublicKeys])
-
-  useEffect(() => {
-    if (!address) {
-      setDevicePublicKey(null)
-      devicePrivateKeyRef.current = null
-      devicePrivateKeyJwkRef.current = null
-      return
-    }
-    if (!crypto?.subtle) return
-    const storageKey = `${E2EE_KEYPAIR_STORAGE_PREFIX}${address.toLowerCase()}`
-    const supabaseClient = supabase
-    const addressLower = address.toLowerCase()
-    let cancelled = false
-    const load = async () => {
-      try {
-        const raw = localStorage.getItem(storageKey)
-        let localKey: { publicKey: string; privateKey: JsonWebKey } | null = null
-        if (raw) {
-          try {
-            localKey = JSON.parse(raw) as {
-              publicKey: string
-              privateKey: JsonWebKey
-            }
-          } catch {
-            localKey = null
-          }
-        }
-        let backupKey: { publicKey: string; privateKey: JsonWebKey } | null = null
-        if (supabaseClient) {
-          const txHash = getE2EEBackupTxHash(addressLower)
-          const { data, error } = await supabaseClient
-            .from('messages')
-            .select('text')
-            .eq('tx_hash', txHash)
-            .eq('chain_id', abstract.id)
-            .limit(1)
-          if (!error && data && data[0]?.text) {
-            const payload = String(data[0].text)
-            const key = await buildSelfBackupKey(addressLower)
-            const decrypted = await decryptPayloadWithKey(payload, key)
-            const backup = decrypted ? parseE2EEBackupData(decrypted) : null
-            if (backup) {
-              backupKey = {
-                publicKey: backup.publicKey,
-                privateKey: backup.privateKey,
-              }
-            }
-          }
-        }
-        const selected = backupKey ?? localKey
-        if (selected) {
-          const privateKey = await importE2EEPrivateKey(selected.privateKey)
-          if (cancelled) return
-          localStorage.setItem(
-            storageKey,
-            JSON.stringify({
-              publicKey: selected.publicKey,
-              privateKey: selected.privateKey,
-            }),
-          )
-          devicePrivateKeyRef.current = privateKey
-          devicePrivateKeyJwkRef.current = selected.privateKey
-          setDevicePublicKey(selected.publicKey)
-          return
-        }
-        const pair = await crypto.subtle.generateKey(
-          { name: 'ECDH', namedCurve: 'P-256' },
-          true,
-          ['deriveBits'],
-        )
-        const publicRaw = new Uint8Array(
-          await crypto.subtle.exportKey('raw', pair.publicKey),
-        )
-        const privateKey = await crypto.subtle.exportKey('jwk', pair.privateKey)
-        const publicKey = toBase64(publicRaw)
-        localStorage.setItem(
-          storageKey,
-          JSON.stringify({ publicKey, privateKey }),
-        )
-        if (cancelled) return
-        devicePrivateKeyRef.current = pair.privateKey
-        devicePrivateKeyJwkRef.current = privateKey as JsonWebKey
-        setDevicePublicKey(publicKey)
-      } catch {
-        if (!cancelled) {
-          setDevicePublicKey(null)
-          devicePrivateKeyRef.current = null
-        }
-      }
-    }
-    load()
-    return () => {
-      cancelled = true
-    }
-  }, [address])
-
-  useEffect(() => {
-    const supabaseClient = supabase
-    if (!supabaseClient || !address || !devicePublicKey) return
-    const privateKeyJwk = devicePrivateKeyJwkRef.current
-    if (!privateKeyJwk) return
-    let cancelled = false
-    const addressLower = address.toLowerCase()
-    const statusKey = `abstract-messenger:e2ee-backup:${addressLower}`
-    const ensureBackup = async () => {
-      try {
-        const txHash = getE2EEBackupTxHash(addressLower)
-        const { data } = await supabaseClient
-          .from('messages')
-          .select('text')
-          .eq('tx_hash', txHash)
-          .eq('chain_id', abstract.id)
-          .limit(1)
-        if (!cancelled && data && data[0]?.text) {
-          const payload = String(data[0].text)
-          const key = await buildSelfBackupKey(addressLower)
-          const decrypted = await decryptPayloadWithKey(payload, key)
-          const backup = decrypted ? parseE2EEBackupData(decrypted) : null
-          if (backup?.publicKey) {
-            localStorage.setItem(statusKey, backup.publicKey)
-            return
-          }
-        }
-        const fingerprint = devicePublicKey
-        const stored = localStorage.getItem(statusKey)
-        if (stored === fingerprint) return
-        const backupPayload = JSON.stringify({
-          type: E2EE_BACKUP_TYPE,
-          publicKey: devicePublicKey,
-          privateKey: privateKeyJwk,
-        })
-        const encrypted = await encryptPayload(
-          backupPayload,
-          addressLower,
-          addressLower,
-          addressLower,
-          devicePublicKey,
-        )
-        const createdAt = new Date().toISOString()
-        await supabaseClient.from('messages').upsert(
-          [
-            {
-              tx_hash: txHash,
-              from_address: addressLower,
-              to_address: addressLower,
-              text: encrypted,
-              created_at: createdAt,
-              chain_id: abstract.id,
-            },
-          ],
-          { onConflict: 'tx_hash' },
-        )
-        if (!cancelled) {
-          localStorage.setItem(statusKey, fingerprint)
-        }
-      } catch {
-        return
-      }
-    }
-    ensureBackup()
-    return () => {
-      cancelled = true
-    }
-  }, [address, devicePublicKey])
-
-  useEffect(() => {
     activePeerRef.current = activePeer ? activePeer.toLowerCase() : ''
   }, [activePeer])
+
+  useEffect(() => {
+    activeSecretRef.current = activeSecret
+  }, [activeSecret])
+
+  useEffect(() => {
+    if (!supabase || !address) {
+      setSecretPeers({})
+      return
+    }
+    const supabaseClient = supabase
+    const addressLower = address.toLowerCase()
+    loadSecretChats(addressLower)
+    const channel = supabaseClient.channel(`chat:secrets:${addressLower}`)
+    const handleRow = (row: {
+      address_a: string
+      address_b: string
+      created_at: string
+    }) => {
+      const peerLower =
+        row.address_a.toLowerCase() === addressLower
+          ? row.address_b.toLowerCase()
+          : row.address_a.toLowerCase()
+      setSecretPeers((prev) => ({ ...prev, [peerLower]: row.created_at }))
+    }
+    const handleRemove = (row: { address_a: string; address_b: string }) => {
+      const peerLower =
+        row.address_a.toLowerCase() === addressLower
+          ? row.address_b.toLowerCase()
+          : row.address_a.toLowerCase()
+      setSecretPeers((prev) => {
+        const next = { ...prev }
+        delete next[peerLower]
+        return next
+      })
+    }
+    channel
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'secret_chats',
+          filter: `chain_id=eq.${abstract.id},address_a=eq.${addressLower}`,
+        },
+        (payload) =>
+          handleRow(
+            payload.new as {
+              address_a: string
+              address_b: string
+              created_at: string
+            },
+          ),
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'secret_chats',
+          filter: `chain_id=eq.${abstract.id},address_b=eq.${addressLower}`,
+        },
+        (payload) =>
+          handleRow(
+            payload.new as {
+              address_a: string
+              address_b: string
+              created_at: string
+            },
+          ),
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'DELETE',
+          schema: 'public',
+          table: 'secret_chats',
+          filter: `chain_id=eq.${abstract.id},address_a=eq.${addressLower}`,
+        },
+        (payload) =>
+          handleRemove(
+            payload.old as {
+              address_a: string
+              address_b: string
+            },
+          ),
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'DELETE',
+          schema: 'public',
+          table: 'secret_chats',
+          filter: `chain_id=eq.${abstract.id},address_b=eq.${addressLower}`,
+        },
+        (payload) =>
+          handleRemove(
+            payload.old as {
+              address_a: string
+              address_b: string
+            },
+          ),
+      )
+      .subscribe()
+    secretChatsChannelRef.current = channel
+    return () => {
+      if (secretChatsChannelRef.current) {
+        supabaseClient.removeChannel(secretChatsChannelRef.current)
+        secretChatsChannelRef.current = null
+      }
+    }
+  }, [address, loadSecretChats])
 
   useEffect(() => {
     hiddenPeersRef.current = hiddenPeers
@@ -963,35 +875,6 @@ function App() {
   useEffect(() => {
     customAvatarsRef.current = customAvatars
   }, [customAvatars])
-
-  const rememberPeerPublicKey = useCallback((peerLower: string, key: string) => {
-    setPeerPublicKeys((prev) => {
-      if (prev[peerLower] === key) return prev
-      return { ...prev, [peerLower]: key }
-    })
-  }, [])
-
-  const getSharedKey = useCallback(
-    async (peerLower: string, peerPubKey: string) => {
-      const cached = sharedKeysRef.current[peerLower]
-      if (cached && cached.pub === peerPubKey) return cached.key
-      const privateKey = devicePrivateKeyRef.current
-      if (!privateKey) return null
-      try {
-        const peerBytes = fromBase64(peerPubKey)
-        const peerPublic = await importE2EEPublicKey(toArrayBuffer(peerBytes))
-        const key = await deriveSharedE2EEKey(privateKey, peerPublic)
-        sharedKeysRef.current = {
-          ...sharedKeysRef.current,
-          [peerLower]: { pub: peerPubKey, key },
-        }
-        return key
-      } catch {
-        return null
-      }
-    },
-    [],
-  )
 
   useEffect(() => {
     const root = document.documentElement
@@ -1125,6 +1008,23 @@ function App() {
       return inputLower !== '' && p.toLowerCase() === inputLower
     })
   }, [messages, address, peerInput, peerInputValid, hiddenPeers])
+
+  const peerCards = useMemo(() => {
+    const base = new Set(peers.map((p) => p.toLowerCase()))
+    const cards: { peer: string; secret: boolean }[] = []
+    base.forEach((peerLower) => {
+      cards.push({ peer: peerLower, secret: false })
+      if (secretPeers[peerLower]) {
+        cards.push({ peer: peerLower, secret: true })
+      }
+    })
+    Object.keys(secretPeers).forEach((peerLower) => {
+      if (!base.has(peerLower)) {
+        cards.push({ peer: peerLower, secret: true })
+      }
+    })
+    return cards
+  }, [peers, secretPeers])
 
   useEffect(() => {
     const targets = new Set<string>()
@@ -1345,12 +1245,14 @@ function App() {
       .filter((message) => {
         const from = message.from.toLowerCase()
         const to = message.to.toLowerCase()
-        return (
+        const pairMatch =
           (from === own && to === peer) || (from === peer && to === own)
-        )
+        if (!pairMatch) return false
+        if (activeSecret) return isEncryptedPayload(message.payload)
+        return !isEncryptedPayload(message.payload)
       })
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
-  }, [messages, address, activePeer, activePeerValid])
+  }, [messages, address, activePeer, activePeerValid, activeSecret])
 
   useEffect(() => {
     shouldAutoScrollRef.current = true
@@ -1439,24 +1341,13 @@ function App() {
   }, [address])
 
   useEffect(() => {
-    if (!address || !activePeerValid) {
+    if (!address || !activePeerValid || !activeSecret) {
       setChatKeySaved('')
       return
     }
-    // Auto-generate key using ECDH-like derivation (simplified for demo)
-    // In a real app, use proper ECDH with secp256k1
-    const generateSharedKey = async () => {
-      const [a, b] = [address.toLowerCase(), activePeer.toLowerCase()].sort()
-      const seed = `${a}:${b}:shared-secret-v1`
-      const hash = await crypto.subtle.digest(
-        'SHA-256',
-        encoder.encode(seed),
-      )
-      const key = toBase64(new Uint8Array(hash))
-      setChatKeySaved(key)
-    }
-    generateSharedKey()
-  }, [address, activePeer, activePeerValid])
+    const peerLower = activePeer.toLowerCase()
+    setChatKeySaved(secretPassphrases[peerLower] ?? '')
+  }, [address, activePeer, activePeerValid, activeSecret, secretPassphrases])
 
   // Derive and cache CryptoKey when chat key changes
   useEffect(() => {
@@ -1482,7 +1373,7 @@ function App() {
   }, [address, activePeer, activePeerValid, chatKeySaved])
 
   useEffect(() => {
-    if (!address || !activePeerValid) return
+    if (!address || !activePeerValid || !activeSecret || !conversationKey) return
     let cancelled = false
     const own = address.toLowerCase()
     const activePeerLower = activePeer.toLowerCase()
@@ -1508,22 +1399,7 @@ function App() {
 
       await Promise.all(
         needed.map(async ({ m, index }) => {
-          let decrypted: string | null = null
-          if (m.payload.startsWith(ENCRYPTED_V2_PREFIX)) {
-            const parsed = parseEncryptedV2Payload(m.payload)
-            const peerLower =
-              m.from.toLowerCase() === own ? m.to.toLowerCase() : m.from.toLowerCase()
-            const pubKey = parsed?.senderPubKey ?? getSenderPubKeyFromPayload(m.payload)
-            if (pubKey) {
-              const sharedKey = await getSharedKey(peerLower, pubKey)
-              if (sharedKey) {
-                decrypted = await decryptPayloadWithSharedKey(m.payload, sharedKey)
-              }
-            }
-          }
-          if (!decrypted && conversationKey) {
-            decrypted = await decryptPayloadWithKey(m.payload, conversationKey)
-          }
+          const decrypted = await decryptPayloadWithKey(m.payload, conversationKey)
           if (decrypted && decrypted !== m.text) {
             updates[index] = { ...m, text: decrypted }
             changed = true
@@ -1540,15 +1416,7 @@ function App() {
     return () => {
       cancelled = true
     }
-  }, [
-    address,
-    activePeer,
-    activePeerValid,
-    messages,
-    conversationKey,
-    getSharedKey,
-    devicePublicKey,
-  ])
+  }, [address, activePeer, activePeerValid, activeSecret, messages, conversationKey])
 
   useEffect(() => {
     if (!address) return
@@ -1632,56 +1500,11 @@ function App() {
     [],
   )
 
-  const restoreE2EEBackupFromRows = useCallback(
-    async (rows: SupabaseMessage[]) => {
-      if (!address || devicePublicKey || rows.length === 0) return
-      const addressLower = address.toLowerCase()
-      const storageKey = `${E2EE_KEYPAIR_STORAGE_PREFIX}${addressLower}`
-      const key = await buildSelfBackupKey(addressLower)
-      for (const row of rows) {
-        const payload = row.text
-        if (!payload.startsWith(ENCRYPTED_PREFIX)) continue
-        const decrypted = await decryptPayloadWithKey(payload, key)
-        const backup = decrypted ? parseE2EEBackupData(decrypted) : null
-        if (!backup) continue
-        const privateKey = await importE2EEPrivateKey(backup.privateKey)
-        localStorage.setItem(
-          storageKey,
-          JSON.stringify({
-            publicKey: backup.publicKey,
-            privateKey: backup.privateKey,
-          }),
-        )
-        devicePrivateKeyRef.current = privateKey
-        devicePrivateKeyJwkRef.current = backup.privateKey
-        setDevicePublicKey(backup.publicKey)
-        break
-      }
-    },
-    [address, devicePublicKey],
-  )
-
   const ingestMessages = useCallback(
     async (rows: SupabaseMessage[], source?: string) => {
       if (!rows.length || !address) return
       const addressLower = address.toLowerCase()
-      const backupRows: SupabaseMessage[] = []
-      const displayRows: SupabaseMessage[] = []
       for (const row of rows) {
-        const from = row.from_address.toLowerCase()
-        const to = row.to_address.toLowerCase()
-        const isSelf = from === addressLower && to === addressLower
-        if (isSelf && row.text.startsWith(ENCRYPTED_PREFIX)) {
-          backupRows.push(row)
-          continue
-        }
-        displayRows.push(row)
-      }
-      if (backupRows.length > 0) {
-        await restoreE2EEBackupFromRows(backupRows)
-      }
-      if (displayRows.length === 0) return
-      for (const row of displayRows) {
         const from = row.from_address.toLowerCase()
         const to = row.to_address.toLowerCase()
         const peerLower = from === addressLower ? to : from
@@ -1702,50 +1525,32 @@ function App() {
         }
       }
 
-      let oldest = displayRows[0]?.created_at
-      let newest = displayRows[0]?.created_at
-      for (const row of displayRows) {
+      let oldest = rows[0]?.created_at
+      let newest = rows[0]?.created_at
+      for (const row of rows) {
         if (!oldest || row.created_at < oldest) oldest = row.created_at
         if (!newest || row.created_at > newest) newest = row.created_at
       }
       syncLog('messages_ingest', {
         source,
-        count: displayRows.length,
+        count: rows.length,
         oldest,
         newest,
       })
 
       const mapped = await Promise.all(
-        displayRows.map(async (row) => {
+        rows.map(async (row) => {
           const m = toMessage(row)
           const currentKey = conversationKeyRef.current
           const activePeer = activePeerRef.current
-          const senderLower = m.from.toLowerCase()
-          const senderPubKey = getSenderPubKeyFromPayload(m.payload)
-          if (senderPubKey && senderLower !== addressLower) {
-            rememberPeerPublicKey(senderLower, senderPubKey)
-          }
           if (
             activePeer &&
+            activeSecretRef.current &&
             isEncryptedPayload(m.payload) &&
             m.text === 'Encrypted message' &&
             (m.from.toLowerCase() === activePeer ||
               m.to.toLowerCase() === activePeer)
           ) {
-            if (m.payload.startsWith(ENCRYPTED_V2_PREFIX)) {
-              const parsed = parseEncryptedV2Payload(m.payload)
-              const pubKey = parsed?.senderPubKey ?? senderPubKey
-              const peerLower =
-                senderLower === addressLower ? m.to.toLowerCase() : senderLower
-              if (pubKey) {
-                const sharedKey = await getSharedKey(peerLower, pubKey)
-                if (sharedKey) {
-                  const decrypted = await decryptPayloadWithSharedKey(m.payload, sharedKey)
-                  if (decrypted) m.text = decrypted
-                  return m
-                }
-              }
-            }
             if (currentKey) {
               const decrypted = await decryptPayloadWithKey(m.payload, currentKey)
               if (decrypted) m.text = decrypted
@@ -1760,7 +1565,7 @@ function App() {
       const activeLower = activePeerRef.current
       if (activeLower) {
         let newest = ''
-        for (const row of displayRows) {
+        for (const row of rows) {
           if (
             row.from_address.toLowerCase() === activeLower &&
             row.to_address.toLowerCase() === addressLower
@@ -1780,7 +1585,7 @@ function App() {
       }
 
       const newestBySender: Record<string, string> = {}
-      for (const row of displayRows) {
+      for (const row of rows) {
         const sender = row.from_address.toLowerCase()
         if (sender === addressLower) continue
         const current = newestBySender[sender]
@@ -1792,14 +1597,7 @@ function App() {
         applyPeerVisibility(sender, false, createdAt)
       })
     },
-    [
-      address,
-      applyPeerVisibility,
-      syncLog,
-      rememberPeerPublicKey,
-      getSharedKey,
-      restoreE2EEBackupFromRows,
-    ],
+    [address, applyPeerVisibility, syncLog],
   )
 
   const loadOlderMessages = useCallback(async () => {
@@ -2359,19 +2157,11 @@ function App() {
           from?: string
           to?: string
           deviceId?: string
-          requestKeypair?: boolean
         }
         if (!data?.from || !data?.to || !data.deviceId) return
         if (data.to.toLowerCase() !== addressLower) return
         if (data.deviceId === deviceIdRef.current) return
         if (document.visibilityState === 'hidden') return
-        const keypairPayload =
-          data.requestKeypair && devicePublicKey && devicePrivateKeyJwkRef.current
-            ? {
-                publicKey: devicePublicKey,
-                privateKey: devicePrivateKeyJwkRef.current,
-              }
-            : null
         channel.send({
           type: 'broadcast',
           event: 'sync_state',
@@ -2383,8 +2173,6 @@ function App() {
             peerVisibilityUpdatedAt: peerVisibilityUpdatedAtRef.current,
             customNames: customNamesRef.current,
             customAvatars: customAvatarsRef.current,
-            peerPublicKeys: peerPublicKeysRef.current,
-            e2eeKeypair: keypairPayload ?? undefined,
           },
         })
       })
@@ -2397,8 +2185,6 @@ function App() {
           peerVisibilityUpdatedAt?: Record<string, string>
           customNames?: Record<string, string | null>
           customAvatars?: Record<string, string | null>
-          peerPublicKeys?: Record<string, string>
-          e2eeKeypair?: { publicKey?: string; privateKey?: JsonWebKey }
         }
         if (!data?.from || !data?.to || !data.deviceId) return
         if (data.to.toLowerCase() !== addressLower) return
@@ -2428,34 +2214,6 @@ function App() {
         if (data.customAvatars && typeof data.customAvatars === 'object') {
           setCustomAvatars((prev) => ({ ...prev, ...data.customAvatars }))
         }
-        if (data.peerPublicKeys && typeof data.peerPublicKeys === 'object') {
-          setPeerPublicKeys((prev) => ({ ...prev, ...data.peerPublicKeys }))
-        }
-        if (
-          !devicePublicKey &&
-          data.e2eeKeypair?.publicKey &&
-          data.e2eeKeypair?.privateKey
-        ) {
-          const storageKey = `${E2EE_KEYPAIR_STORAGE_PREFIX}${addressLower}`
-          const incoming = {
-            publicKey: data.e2eeKeypair.publicKey,
-            privateKey: data.e2eeKeypair.privateKey,
-          }
-          localStorage.setItem(storageKey, JSON.stringify(incoming))
-          void (async () => {
-            try {
-              const privateKey = await importE2EEPrivateKey(
-                data.e2eeKeypair!.privateKey as JsonWebKey,
-              )
-              devicePrivateKeyRef.current = privateKey
-              devicePrivateKeyJwkRef.current = data.e2eeKeypair!
-                .privateKey as JsonWebKey
-              setDevicePublicKey(data.e2eeKeypair!.publicKey as string)
-            } catch {
-              return
-            }
-          })()
-        }
       })
       .subscribe((status) => {
         syncLog('signals_status', { status })
@@ -2467,7 +2225,6 @@ function App() {
               from: addressLower,
               to: addressLower,
               deviceId: deviceIdRef.current,
-              requestKeypair: !devicePublicKey,
             },
           })
         }
@@ -2477,7 +2234,7 @@ function App() {
       channel.unsubscribe()
       signalsChannelRef.current = null
     }
-  }, [address, applyPeerVisibility, fetchMessageUpdates, syncLog, devicePublicKey])
+  }, [address, applyPeerVisibility, fetchMessageUpdates, syncLog])
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -2611,17 +2368,23 @@ function App() {
     const peer = peerInput.toLowerCase()
     const updatedAt = new Date().toISOString()
     setActivePeer(peer)
+    setActiveSecret(false)
+    setSecretPassphraseDraft('')
     applyPeerVisibility(peer, false, updatedAt)
     setLastReadByPeer((prev) => ({ ...prev, [peer]: new Date().toISOString() }))
     setError(null)
     emitPeerVisibility(peer, false, updatedAt)
   }
 
-  const handleSelectPeer = (peer: string) => {
+  const handleSelectPeer = (peer: string, secret?: boolean) => {
     const peerLower = peer.toLowerCase()
     const updatedAt = new Date().toISOString()
     setActivePeer(peerLower)
     setPeerInput(peerLower)
+    setActiveSecret(Boolean(secret))
+    setSecretPassphraseDraft(
+      secret ? secretPassphrases[peerLower] ?? '' : '',
+    )
     applyPeerVisibility(peerLower, false, updatedAt)
     setLastReadByPeer((prev) => ({
       ...prev,
@@ -2629,6 +2392,21 @@ function App() {
     }))
     setError(null)
     emitPeerVisibility(peerLower, false, updatedAt)
+  }
+
+  const handleSaveSecretPassphrase = () => {
+    if (!activePeerValid) return
+    const peerLower = activePeer.toLowerCase()
+    const next = secretPassphraseDraft.trim()
+    setSecretPassphrases((prev) => {
+      if (!next) {
+        const updated = { ...prev }
+        delete updated[peerLower]
+        return updated
+      }
+      return { ...prev, [peerLower]: next }
+    })
+    setError(null)
   }
 
   const sendMessage = async (overrideText?: string) => {
@@ -2660,15 +2438,11 @@ function App() {
     const peerLower = activePeer.toLowerCase()
     let payload: string | null = null
     try {
-      const senderPubKey = devicePublicKey ?? undefined
-      const peerPubKey = peerPublicKeysRef.current[peerLower]
-      if (senderPubKey && peerPubKey) {
-        const sharedKey = await getSharedKey(peerLower, peerPubKey)
-        if (sharedKey) {
-          payload = await encryptPayloadWithKey(text, sharedKey, senderPubKey)
+      if (activeSecret) {
+        if (!key) {
+          setError('Set a shared password for this secret chat')
+          return
         }
-      }
-      if (!payload) {
         if (conversationKey) {
           const iv = crypto.getRandomValues(new Uint8Array(12))
           const encrypted = await crypto.subtle.encrypt(
@@ -2676,13 +2450,14 @@ function App() {
             conversationKey,
             encoder.encode(text),
           )
-          const suffix = senderPubKey ? `:${senderPubKey}` : ''
           payload = `${ENCRYPTED_PREFIX}${toBase64(iv)}:${toBase64(
             new Uint8Array(encrypted),
-          )}${suffix}`
+          )}`
         } else {
-          payload = await encryptPayload(text, key, address, activePeer, senderPubKey)
+          payload = await encryptPayload(text, key, address, activePeer)
         }
+      } else {
+        payload = text
       }
     } catch (err) {
       setError(getErrorMessage(err))
@@ -2985,6 +2760,8 @@ function App() {
   const handleBackToList = () => {
     setActivePeer('')
     setPeerInput('')
+    setActiveSecret(false)
+    setSecretPassphraseDraft('')
     setError(null)
   }
 
@@ -3140,27 +2917,77 @@ function App() {
             {t.hint}
           </div>
           <div className="peer-list">
-            {peers.length === 0 ? (
+            {peerCards.length === 0 ? (
               <div className="peer-list__empty">
                 {t.emptyPeers}
               </div>
             ) : (
-              peers.map((peer) => {
-                const peerLower = peer.toLowerCase()
+              peerCards.map((card) => {
+                const peerLower = card.peer.toLowerCase()
+                const isSecretCard = card.secret
+                const hasSecret = Boolean(secretPeers[peerLower])
+                const isActive =
+                  activePeer.toLowerCase() === peerLower &&
+                  activeSecret === isSecretCard
+                const canCreateSecret = !hasSecret && !isSecretCard
                 return (
                   <button
-                    key={peer}
-                    className={`peer ${
-                      activePeer.toLowerCase() === peerLower ? 'peer--active' : ''
-                    } ${isEditing ? 'peer--shake' : ''}`}
-                    onClick={() => !isEditing && handleSelectPeer(peer)}
+                    key={`${peerLower}:${isSecretCard ? 'secret' : 'main'}`}
+                    className={`peer ${isActive ? 'peer--active' : ''} ${
+                      isEditing ? 'peer--shake' : ''
+                    }`}
+                    onClick={() => !isEditing && handleSelectPeer(peerLower, isSecretCard)}
                   >
-                    {isEditing && (
+                    {isEditing && !isSecretCard && (
+                      <div
+                        className={`peer__lock ${
+                          canCreateSecret ? '' : 'peer__lock--off'
+                        }`}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          if (!canCreateSecret) return
+                          void handleCreateSecretChat(peerLower)
+                          handleSelectPeer(peerLower, true)
+                        }}
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <rect
+                            x="6"
+                            y="10"
+                            width="12"
+                            height="9"
+                            rx="2.2"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.6"
+                          />
+                          <path
+                            d="M8 10V7a4 4 0 0 1 8 0v3"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.6"
+                            strokeLinecap="round"
+                          />
+                        </svg>
+                      </div>
+                    )}
+                    {isEditing && isSecretCard && (
                       <div
                         className="peer__remove"
                         onClick={(e) => {
                           e.stopPropagation()
-                          handleRemovePeer(peer)
+                          handleRemoveSecretChat(peerLower)
+                        }}
+                      >
+                        ✕
+                      </div>
+                    )}
+                    {isEditing && !isSecretCard && (
+                      <div
+                        className="peer__remove"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleRemovePeer(peerLower)
                         }}
                       >
                         ✕
@@ -3169,17 +2996,42 @@ function App() {
                     {!isEditing && unreadPeers[peerLower] && (
                       <div className="peer__unread">!</div>
                     )}
+                    {isSecretCard && (
+                      <div className="peer__secret-lock">
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <rect
+                            x="6"
+                            y="10"
+                            width="12"
+                            height="9"
+                            rx="2.2"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.6"
+                          />
+                          <path
+                            d="M8 10V7a4 4 0 0 1 8 0v3"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.6"
+                            strokeLinecap="round"
+                          />
+                        </svg>
+                      </div>
+                    )}
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px', width: '100%', overflow: 'hidden' }}>
                       <AbstractProfile
-                        address={peer}
+                        address={peerLower}
                         size="md"
                         src={customAvatars[peerLower] ?? undefined}
                       />
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', overflow: 'hidden', flex: 1, minWidth: 0 }}>
                         <span className="peer__address" style={{ width: '100%' }}>
-                          {displayNames[peerLower] || shorten(peer)}
+                          {displayNames[peerLower] || shorten(peerLower)}
                         </span>
-                        <span className="peer__full" style={{ width: '100%' }}>{peer}</span>
+                        <span className="peer__full" style={{ width: '100%' }}>
+                          {peerLower}
+                        </span>
                       </div>
                     </div>
                   </button>
@@ -3251,12 +3103,31 @@ function App() {
               visibleMessages={visibleMessages}
               address={address}
               activePeer={activePeer}
+              activeSecret={activeSecret}
               t={t}
               readReceiptsByPeer={readReceiptsByPeer}
               profileNames={displayNames}
               handleRemoveMessage={handleRemoveMessage}
             />
           </div>
+
+          {activePeerValid && activeSecret && (
+            <div className="chat__secret-bar">
+              <input
+                className="input chat__secret-input"
+                placeholder={t.secretPassphrasePlaceholder}
+                value={secretPassphraseDraft}
+                onChange={(event) => setSecretPassphraseDraft(event.target.value)}
+              />
+              <button
+                className="btn btn--ghost chat__secret-save"
+                onClick={handleSaveSecretPassphrase}
+                disabled={!secretPassphraseDraft.trim()}
+              >
+                {t.secretPassphraseSave}
+              </button>
+            </div>
+          )}
 
           <div className="chat__composer">
             <textarea
@@ -3283,7 +3154,11 @@ function App() {
               className="btn btn--composer"
               onClick={handleSend}
               disabled={
-                sending || !connected || !activePeerValid || !messageText.trim()
+                sending ||
+                !connected ||
+                !activePeerValid ||
+                !messageText.trim() ||
+                (activeSecret && !chatKeySaved.trim())
               }
               aria-label={t.send}
               title={t.send}
