@@ -353,6 +353,8 @@ const ENCRYPTED_PREFIX = 'enc:v1:'
 const ENCRYPTED_V2_PREFIX = 'enc:v2:'
 const E2EE_KEYPAIR_STORAGE_PREFIX = 'abstract-messenger:e2ee-keypair:'
 const E2EE_PEERS_STORAGE_PREFIX = 'abstract-messenger:e2ee-peers:'
+const E2EE_BACKUP_TYPE = 'e2ee_key_backup_v1'
+const E2EE_BACKUP_TX_PREFIX = 'e2ee-backup:'
 const GIF_PREFIX = 'gif:'
 const GIF_FILES = ['ppp1.mp4', 'ppp2.mp4', 'ppp3.mp4'] as const
 const MAX_AVATAR_BYTES = 512 * 1024
@@ -375,6 +377,40 @@ const parseEncryptedV1Payload = (payload: string) => {
   const [ivBase64, dataBase64, senderPubKey] = raw.split(':')
   if (!ivBase64 || !dataBase64) return null
   return { ivBase64, dataBase64, senderPubKey }
+}
+
+const getE2EEBackupTxHash = (addressLower: string) =>
+  `${E2EE_BACKUP_TX_PREFIX}${addressLower}`
+
+const buildSelfBackupKey = async (addressLower: string) => {
+  const salt = await getConversationSalt(addressLower, addressLower)
+  return deriveKey(addressLower, salt)
+}
+
+const parseE2EEBackupData = (
+  value: string,
+): { type: string; publicKey: string; privateKey: JsonWebKey } | null => {
+  try {
+    const parsed = JSON.parse(value) as {
+      type?: string
+      publicKey?: string
+      privateKey?: JsonWebKey
+    }
+    if (
+      parsed?.type === E2EE_BACKUP_TYPE &&
+      typeof parsed.publicKey === 'string' &&
+      parsed.privateKey
+    ) {
+      return {
+        type: parsed.type,
+        publicKey: parsed.publicKey,
+        privateKey: parsed.privateKey,
+      }
+    }
+  } catch {
+    return null
+  }
+  return null
 }
 
 const parseEncryptedV2Payload = (payload: string) => {
@@ -753,20 +789,59 @@ function App() {
     }
     if (!crypto?.subtle) return
     const storageKey = `${E2EE_KEYPAIR_STORAGE_PREFIX}${address.toLowerCase()}`
+    const supabaseClient = supabase
+    const addressLower = address.toLowerCase()
     let cancelled = false
     const load = async () => {
       try {
         const raw = localStorage.getItem(storageKey)
+        let localKey: { publicKey: string; privateKey: JsonWebKey } | null = null
         if (raw) {
-          const parsed = JSON.parse(raw) as {
-            publicKey: string
-            privateKey: JsonWebKey
+          try {
+            localKey = JSON.parse(raw) as {
+              publicKey: string
+              privateKey: JsonWebKey
+            }
+          } catch {
+            localKey = null
           }
-          const privateKey = await importE2EEPrivateKey(parsed.privateKey)
+        }
+        let backupKey: { publicKey: string; privateKey: JsonWebKey } | null = null
+        if (supabaseClient) {
+          const txHash = getE2EEBackupTxHash(addressLower)
+          const { data, error } = await supabaseClient
+            .from('messages')
+            .select('text')
+            .eq('tx_hash', txHash)
+            .eq('chain_id', abstract.id)
+            .limit(1)
+          if (!error && data && data[0]?.text) {
+            const payload = String(data[0].text)
+            const key = await buildSelfBackupKey(addressLower)
+            const decrypted = await decryptPayloadWithKey(payload, key)
+            const backup = decrypted ? parseE2EEBackupData(decrypted) : null
+            if (backup) {
+              backupKey = {
+                publicKey: backup.publicKey,
+                privateKey: backup.privateKey,
+              }
+            }
+          }
+        }
+        const selected = backupKey ?? localKey
+        if (selected) {
+          const privateKey = await importE2EEPrivateKey(selected.privateKey)
           if (cancelled) return
+          localStorage.setItem(
+            storageKey,
+            JSON.stringify({
+              publicKey: selected.publicKey,
+              privateKey: selected.privateKey,
+            }),
+          )
           devicePrivateKeyRef.current = privateKey
-          devicePrivateKeyJwkRef.current = parsed.privateKey
-          setDevicePublicKey(parsed.publicKey)
+          devicePrivateKeyJwkRef.current = selected.privateKey
+          setDevicePublicKey(selected.publicKey)
           return
         }
         const pair = await crypto.subtle.generateKey(
@@ -799,6 +874,75 @@ function App() {
       cancelled = true
     }
   }, [address])
+
+  useEffect(() => {
+    const supabaseClient = supabase
+    if (!supabaseClient || !address || !devicePublicKey) return
+    const privateKeyJwk = devicePrivateKeyJwkRef.current
+    if (!privateKeyJwk) return
+    let cancelled = false
+    const addressLower = address.toLowerCase()
+    const statusKey = `abstract-messenger:e2ee-backup:${addressLower}`
+    const ensureBackup = async () => {
+      try {
+        const txHash = getE2EEBackupTxHash(addressLower)
+        const { data } = await supabaseClient
+          .from('messages')
+          .select('text')
+          .eq('tx_hash', txHash)
+          .eq('chain_id', abstract.id)
+          .limit(1)
+        if (!cancelled && data && data[0]?.text) {
+          const payload = String(data[0].text)
+          const key = await buildSelfBackupKey(addressLower)
+          const decrypted = await decryptPayloadWithKey(payload, key)
+          const backup = decrypted ? parseE2EEBackupData(decrypted) : null
+          if (backup?.publicKey) {
+            localStorage.setItem(statusKey, backup.publicKey)
+            return
+          }
+        }
+        const fingerprint = devicePublicKey
+        const stored = localStorage.getItem(statusKey)
+        if (stored === fingerprint) return
+        const backupPayload = JSON.stringify({
+          type: E2EE_BACKUP_TYPE,
+          publicKey: devicePublicKey,
+          privateKey: privateKeyJwk,
+        })
+        const encrypted = await encryptPayload(
+          backupPayload,
+          addressLower,
+          addressLower,
+          addressLower,
+          devicePublicKey,
+        )
+        const createdAt = new Date().toISOString()
+        await supabaseClient.from('messages').upsert(
+          [
+            {
+              tx_hash: txHash,
+              from_address: addressLower,
+              to_address: addressLower,
+              text: encrypted,
+              created_at: createdAt,
+              chain_id: abstract.id,
+            },
+          ],
+          { onConflict: 'tx_hash' },
+        )
+        if (!cancelled) {
+          localStorage.setItem(statusKey, fingerprint)
+        }
+      } catch {
+        return
+      }
+    }
+    ensureBackup()
+    return () => {
+      cancelled = true
+    }
+  }, [address, devicePublicKey])
 
   useEffect(() => {
     activePeerRef.current = activePeer ? activePeer.toLowerCase() : ''
@@ -1480,11 +1624,56 @@ function App() {
     [],
   )
 
+  const restoreE2EEBackupFromRows = useCallback(
+    async (rows: SupabaseMessage[]) => {
+      if (!address || devicePublicKey || rows.length === 0) return
+      const addressLower = address.toLowerCase()
+      const storageKey = `${E2EE_KEYPAIR_STORAGE_PREFIX}${addressLower}`
+      const key = await buildSelfBackupKey(addressLower)
+      for (const row of rows) {
+        const payload = row.text
+        if (!payload.startsWith(ENCRYPTED_PREFIX)) continue
+        const decrypted = await decryptPayloadWithKey(payload, key)
+        const backup = decrypted ? parseE2EEBackupData(decrypted) : null
+        if (!backup) continue
+        const privateKey = await importE2EEPrivateKey(backup.privateKey)
+        localStorage.setItem(
+          storageKey,
+          JSON.stringify({
+            publicKey: backup.publicKey,
+            privateKey: backup.privateKey,
+          }),
+        )
+        devicePrivateKeyRef.current = privateKey
+        devicePrivateKeyJwkRef.current = backup.privateKey
+        setDevicePublicKey(backup.publicKey)
+        break
+      }
+    },
+    [address, devicePublicKey],
+  )
+
   const ingestMessages = useCallback(
     async (rows: SupabaseMessage[], source?: string) => {
       if (!rows.length || !address) return
       const addressLower = address.toLowerCase()
+      const backupRows: SupabaseMessage[] = []
+      const displayRows: SupabaseMessage[] = []
       for (const row of rows) {
+        const from = row.from_address.toLowerCase()
+        const to = row.to_address.toLowerCase()
+        const isSelf = from === addressLower && to === addressLower
+        if (isSelf && row.text.startsWith(ENCRYPTED_PREFIX)) {
+          backupRows.push(row)
+          continue
+        }
+        displayRows.push(row)
+      }
+      if (backupRows.length > 0) {
+        await restoreE2EEBackupFromRows(backupRows)
+      }
+      if (displayRows.length === 0) return
+      for (const row of displayRows) {
         const from = row.from_address.toLowerCase()
         const to = row.to_address.toLowerCase()
         const peerLower = from === addressLower ? to : from
@@ -1505,21 +1694,21 @@ function App() {
         }
       }
 
-      let oldest = rows[0]?.created_at
-      let newest = rows[0]?.created_at
-      for (const row of rows) {
+      let oldest = displayRows[0]?.created_at
+      let newest = displayRows[0]?.created_at
+      for (const row of displayRows) {
         if (!oldest || row.created_at < oldest) oldest = row.created_at
         if (!newest || row.created_at > newest) newest = row.created_at
       }
       syncLog('messages_ingest', {
         source,
-        count: rows.length,
+        count: displayRows.length,
         oldest,
         newest,
       })
 
       const mapped = await Promise.all(
-        rows.map(async (row) => {
+        displayRows.map(async (row) => {
           const m = toMessage(row)
           const currentKey = conversationKeyRef.current
           const activePeer = activePeerRef.current
@@ -1563,7 +1752,7 @@ function App() {
       const activeLower = activePeerRef.current
       if (activeLower) {
         let newest = ''
-        for (const row of rows) {
+        for (const row of displayRows) {
           if (
             row.from_address.toLowerCase() === activeLower &&
             row.to_address.toLowerCase() === addressLower
@@ -1583,7 +1772,7 @@ function App() {
       }
 
       const newestBySender: Record<string, string> = {}
-      for (const row of rows) {
+      for (const row of displayRows) {
         const sender = row.from_address.toLowerCase()
         if (sender === addressLower) continue
         const current = newestBySender[sender]
@@ -1595,7 +1784,14 @@ function App() {
         applyPeerVisibility(sender, false, createdAt)
       })
     },
-    [address, applyPeerVisibility, syncLog, rememberPeerPublicKey, getSharedKey],
+    [
+      address,
+      applyPeerVisibility,
+      syncLog,
+      rememberPeerPublicKey,
+      getSharedKey,
+      restoreE2EEBackupFromRows,
+    ],
   )
 
   const loadOlderMessages = useCallback(async () => {
