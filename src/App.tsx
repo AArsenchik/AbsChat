@@ -1392,6 +1392,8 @@ function App() {
       setProfileNames({})
       setCustomNames({})
       setCustomAvatars({})
+      setSecretPassphrases({})
+      setSecretPassphraseDraft('')
       return
     }
     const key = `abstract-messenger:${address.toLowerCase()}`
@@ -1411,6 +1413,8 @@ function App() {
         setPeerVisibilityUpdatedAt({})
         setLastReadByPeer({})
         setReadReceiptsByPeer({})
+        setSecretPassphrases({})
+        setSecretPassphraseDraft('')
         return
       }
       const parsed = JSON.parse(raw) as {
@@ -1423,6 +1427,7 @@ function App() {
         peerVisibilityUpdatedAt?: Record<string, string>
         hiddenSecretPeers?: string[]
         secretVisibilityUpdatedAt?: Record<string, string>
+        secretPassphrases?: Record<string, string>
         lastReadByPeer?: Record<string, string>
         readReceiptsByPeer?: Record<string, string>
       }
@@ -1439,6 +1444,7 @@ function App() {
       setPeerVisibilityUpdatedAt(parsed.peerVisibilityUpdatedAt ?? {})
       setHiddenSecretPeers(parsed.hiddenSecretPeers ?? [])
       setSecretVisibilityUpdatedAt(parsed.secretVisibilityUpdatedAt ?? {})
+      setSecretPassphrases(parsed.secretPassphrases ?? {})
       setLastReadByPeer(parsed.lastReadByPeer ?? {})
       setReadReceiptsByPeer(parsed.readReceiptsByPeer ?? {})
       lastScannedBlock.current = parsed.lastScannedBlock
@@ -1455,6 +1461,8 @@ function App() {
       setPeerVisibilityUpdatedAt({})
       setHiddenSecretPeers([])
       setSecretVisibilityUpdatedAt({})
+      setSecretPassphrases({})
+      setSecretPassphraseDraft('')
       setLastReadByPeer({})
       setReadReceiptsByPeer({})
     }
@@ -1589,6 +1597,7 @@ function App() {
       peerVisibilityUpdatedAt,
       hiddenSecretPeers,
       secretVisibilityUpdatedAt,
+      secretPassphrases,
       lastReadByPeer,
       readReceiptsByPeer,
     }
@@ -1604,6 +1613,7 @@ function App() {
     peerVisibilityUpdatedAt,
     hiddenSecretPeers,
     secretVisibilityUpdatedAt,
+    secretPassphrases,
     lastReadByPeer,
     readReceiptsByPeer,
   ])
