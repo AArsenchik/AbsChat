@@ -68,34 +68,30 @@
         <h2>Overview</h2>
         <p>
           Abstract Messenger enables address-based chats. Messages are transmitted as on-chain
-          transactions on AbstractChain, and mirrored to an indexed datastore to enable fast
-          retrieval and cross-device availability. Payloads are encrypted client-side with automatic
-          E2EE using device keys; a legacy fallback may be used until both sides exchange keys.
+          transactions on AbstractChain, and mirrored to an indexed datastore for fast retrieval
+          and cross-device availability. Regular chats use deterministic client-side encryption for
+          privacy, while Secret chats use password-based E2EE.
         </p>
 
         <h2>Key Advantages over Web2</h2>
         <ul class="list">
           <li><strong>Anonymity:</strong> Chats are address-based; no email/phone/SSO.</li>
           <li><strong>Ownership:</strong> Messages are tied to your wallet; no centralized accounts.</li>
-          <li><strong>Client-side encryption:</strong> Payloads are encrypted with AES‑GCM (see Security Notes).</li>
+          <li><strong>E2EE for Secret chats:</strong> Shared-password encryption with AES‑GCM.</li>
           <li><strong>Portability:</strong> History can be reconstructed from chain, independent of any single server.</li>
           <li><strong>Transparency:</strong> Message metadata is verifiable; payloads remain unreadable to others.</li>
         </ul>
 
         <h2>How Encryption Works</h2>
         <p>
-          Each device generates a local ECDH keypair. When two devices exchange public keys, a shared secret
-          is derived and used to encrypt payloads with AES‑GCM. The sender’s public key is included in the
-          payload so recipients can derive the same shared key automatically.
+          There are two modes:
         </p>
         <ul class="list">
-          <li>E2EE derivation: ECDH (device keypairs) → shared secret.</li>
-          <li>Cipher: AES‑GCM (256‑bit), random IV per message.</li>
-          <li>Prefix (E2EE): <code>enc:v2:&lt;sender_pub&gt;:&lt;iv_base64&gt;:&lt;ciphertext_base64&gt;</code>.</li>
-          <li>
-            Legacy fallback: deterministic PBKDF2 key + conversation salt, encoded as
-            <code>enc:v1:&lt;iv_base64&gt;:&lt;ciphertext_base64&gt;[:sender_pub]</code> until keys are exchanged.
-          </li>
+          <li><strong>Regular chats:</strong> A deterministic key is derived from the two addresses. This is not E2EE.</li>
+          <li><strong>Secret chats:</strong> Both sides set the same shared password.</li>
+          <li><strong>Key derivation:</strong> Password + per-conversation salt → key.</li>
+          <li><strong>Cipher:</strong> AES‑GCM (256‑bit), random IV per message.</li>
+          <li><strong>Storage:</strong> Passwords are stored only on the local device and never synced.</li>
         </ul>
 
         <h2>Realtime and Reliability</h2>
@@ -137,17 +133,18 @@
         <h2>Recent Updates</h2>
         <ul class="list">
           <li>Refined dark theme with radial background depth and calmer accent usage.</li>
-          <li>Chat cards: increased radius, padding, and glass depth.</li>
+          <li>Secret chats with a lock indicator in the chat list and header.</li>
+          <li>Password-based E2EE flows, plus instant blur on invalid/cleared passwords.</li>
+          <li>Secret chat visibility sync across devices for the same account.</li>
           <li>Input polish: updated search field, composer focus styling, and scrollbar cleanup.</li>
           <li>Multi-device sync diagnostics: detailed timing logs for realtime, polling, and chain recovery.</li>
-          <li>Automatic E2EE handshake with device keys and ECDH-based shared secrets.</li>
         </ul>
 
         <h2>Security Notes</h2>
         <ul class="list">
-          <li>E2EE keys are stored locally per device; clearing storage can make old E2EE messages unreadable.</li>
+          <li>Secret chat passwords are stored locally per device; clearing storage can make old messages unreadable.</li>
+          <li>Regular chats are not E2EE; they use deterministic encryption derived from addresses.</li>
           <li>A compromised device can expose locally cached messages and encryption keys.</li>
-          <li>Legacy v1 derivation is deterministic and not secret; it may appear before E2EE keys are exchanged.</li>
           <li>Addresses and timestamps are public on-chain; metadata is always visible.</li>
           <li>Supabase policies allow public read/write of encrypted payloads; treat it as public data.</li>
           <li>Consider using fresh addresses for stronger unlinkability.</li>

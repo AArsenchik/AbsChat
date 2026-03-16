@@ -590,6 +590,8 @@ html, body {
   padding-right: 6px;
   padding-top: 2px;
   min-height: 0;
+  max-height: 100%;
+  overscroll-behavior: contain;
 }
 
 .peer-list__empty {
@@ -696,8 +698,8 @@ html, body {
   position: absolute;
   top: 6px;
   left: 6px;
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
   background: rgba(32, 217, 138, 0.9);
   color: #04120b;
@@ -713,8 +715,8 @@ html, body {
 }
 
 .peer__secret-lock svg {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
 }
 
 .peer__unread {
@@ -777,6 +779,10 @@ html, body {
 
 .panel--chat {
   gap: 18px;
+}
+
+.panel--left {
+  min-height: 0;
 }
 
 .chat__header {

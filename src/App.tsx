@@ -2682,7 +2682,7 @@ function App() {
     emitPeerVisibility(peerLower, false, updatedAt)
   }
 
-  const handleSaveSecretPassphrase = () => {
+  const handleSaveSecretPassphrase = async () => {
     if (!activePeerValid) return
     const peerLower = activePeer.toLowerCase()
     const next = secretPassphraseDraft.trim()
@@ -2715,6 +2715,17 @@ function App() {
     setSecretPassphraseDraft(next)
     if (activeSecret) {
       setChatKeySaved(next)
+      if (!next) {
+        setConversationKey(null)
+      } else if (address) {
+        try {
+          const salt = await getConversationSalt(address, activePeer)
+          const key = await deriveKey(next, salt)
+          setConversationKey(key)
+        } catch {
+          setConversationKey(null)
+        }
+      }
     }
     setError(null)
   }
