@@ -2621,15 +2621,31 @@ function App() {
 
   useEffect(() => {
     if (!address || !activePeerValid) return
+    const own = address.toLowerCase()
     const peerLower = activePeer.toLowerCase()
-    const incoming = visibleMessages.filter(
-      (message) => message.from.toLowerCase() === peerLower,
-    )
-    if (incoming.length === 0) return
-    const latest = incoming[incoming.length - 1].createdAt
+    let latest = ''
+    for (const message of messages) {
+      const from = message.from.toLowerCase()
+      const to = message.to.toLowerCase()
+      const pairMatch =
+        (from === own && to === peerLower) || (from === peerLower && to === own)
+      if (!pairMatch) continue
+      if (activeSecret) {
+        if (!message.payload.startsWith(SECRET_ENCRYPTED_PREFIX)) continue
+      } else if (message.payload.startsWith(SECRET_ENCRYPTED_PREFIX)) {
+        continue
+      }
+      if (from !== peerLower) continue
+      if (!latest || message.createdAt > latest) {
+        latest = message.createdAt
+      }
+    }
+    if (!latest) return
+    const current = lastReadByPeer[peerLower] ?? '1970-01-01'
+    if (latest <= current) return
     setLastReadByPeer((prev) => {
-      const current = prev[peerLower] ?? '1970-01-01'
-      if (latest <= current) return prev
+      const existing = prev[peerLower] ?? '1970-01-01'
+      if (latest <= existing) return prev
       return { ...prev, [peerLower]: latest }
     })
     signalsChannelRef.current?.send({
@@ -2641,7 +2657,7 @@ function App() {
         readAt: latest,
       },
     })
-  }, [address, activePeerValid, activePeer, visibleMessages])
+  }, [address, activePeerValid, activePeer, activeSecret, lastReadByPeer, messages])
 
   const handleRemovePeer = (peer: string) => {
     const confirmed = window.confirm(
