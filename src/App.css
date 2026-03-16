@@ -798,12 +798,32 @@ html, body {
 }
 
 .chat__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   font-size: 18px;
   font-weight: 600;
   margin-top: 2px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.chat__title-lock {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(32, 217, 138, 0.9);
+  color: #04120b;
+  flex-shrink: 0;
+}
+
+.chat__title-lock svg {
+  width: 12px;
+  height: 12px;
 }
 
 .chat__typing {

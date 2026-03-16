@@ -675,7 +675,9 @@ function App() {
       : `${Date.now()}-${Math.random()}`,
   )
   const hiddenPeersRef = useRef<string[]>([])
+  const hiddenSecretPeersRef = useRef<string[]>([])
   const peerVisibilityUpdatedAtRef = useRef<Record<string, string>>({})
+  const secretVisibilityUpdatedAtRef = useRef<Record<string, string>>({})
   const customNamesRef = useRef<Record<string, string | null>>({})
   const customAvatarsRef = useRef<Record<string, string | null>>({})
   const oldestMessageByPeerRef = useRef<Record<string, string>>({})
@@ -693,6 +695,8 @@ function App() {
   const [profileError, setProfileError] = useState<string | null>(null)
   const [hiddenPeers, setHiddenPeers] = useState<string[]>([])
   const [peerVisibilityUpdatedAt, setPeerVisibilityUpdatedAt] = useState<Record<string, string>>({})
+  const [hiddenSecretPeers, setHiddenSecretPeers] = useState<string[]>([])
+  const [secretVisibilityUpdatedAt, setSecretVisibilityUpdatedAt] = useState<Record<string, string>>({})
 
   const syncLog = useCallback(
     (event: string, data?: Record<string, unknown>) => {
@@ -700,6 +704,25 @@ function App() {
       const addr = address ? address.toLowerCase() : ''
       const deviceId = deviceIdRef.current
       console.log('[sync]', stamp, event, { address: addr, deviceId, ...data })
+    },
+    [address],
+  )
+
+  const emitSecretVisibility = useCallback(
+    (peer: string, hidden: boolean, updatedAt: string) => {
+      if (!signalsChannelRef.current || !address) return
+      const addressLower = address.toLowerCase()
+      signalsChannelRef.current.send({
+        type: 'broadcast',
+        event: 'secret_visibility',
+        payload: {
+          from: addressLower,
+          to: addressLower,
+          peer,
+          hidden,
+          updatedAt,
+        },
+      })
     },
     [address],
   )
@@ -756,41 +779,40 @@ function App() {
             ],
             { onConflict: 'address_a,address_b,chain_id' },
           )
+        setHiddenSecretPeers((prev) => prev.filter((peer) => peer !== peerLower))
+        setSecretVisibilityUpdatedAt((prev) => ({
+          ...prev,
+          [peerLower]: createdAt,
+        }))
         setSecretPeers((prev) => ({ ...prev, [peerLower]: createdAt }))
+        emitSecretVisibility(peerLower, false, createdAt)
         syncLog('secret_chat_create', { peer: peerLower })
       } catch (err) {
         syncLog('secret_chat_create_error', { error: getErrorMessage(err) })
       }
     },
-    [address, syncLog],
+    [address, emitSecretVisibility, syncLog],
   )
 
   const handleRemoveSecretChat = useCallback(
     async (peerLower: string) => {
-      if (!supabase || !address) return
-      const addressLower = address.toLowerCase()
-      const [addressA, addressB] = [addressLower, peerLower].sort()
-      try {
-        await supabase
-          .from('secret_chats')
-          .delete()
-          .eq('address_a', addressA)
-          .eq('address_b', addressB)
-          .eq('chain_id', abstract.id)
-        setSecretPeers((prev) => {
-          const next = { ...prev }
-          delete next[peerLower]
-          return next
-        })
-        if (activeSecret && activePeer.toLowerCase() === peerLower) {
-          setActiveSecret(false)
-        }
-        syncLog('secret_chat_remove', { peer: peerLower })
-      } catch (err) {
-        syncLog('secret_chat_remove_error', { error: getErrorMessage(err) })
+      if (!address) return
+      const updatedAt = new Date().toISOString()
+      setHiddenSecretPeers((prev) => {
+        if (prev.includes(peerLower)) return prev
+        return [...prev, peerLower]
+      })
+      setSecretVisibilityUpdatedAt((prev) => ({
+        ...prev,
+        [peerLower]: updatedAt,
+      }))
+      if (activeSecret && activePeer.toLowerCase() === peerLower) {
+        setActiveSecret(false)
       }
+      emitSecretVisibility(peerLower, true, updatedAt)
+      syncLog('secret_chat_remove', { peer: peerLower })
     },
-    [address, activePeer, activeSecret, syncLog],
+    [address, activePeer, activeSecret, emitSecretVisibility, syncLog],
   )
 
   useEffect(() => {
@@ -823,6 +845,14 @@ function App() {
         row.address_a.toLowerCase() === addressLower
           ? row.address_b.toLowerCase()
           : row.address_a.toLowerCase()
+      const current = secretVisibilityUpdatedAtRef.current[peerLower] ?? '1970-01-01'
+      if (row.created_at > current) {
+        setHiddenSecretPeers((prev) => prev.filter((peer) => peer !== peerLower))
+        setSecretVisibilityUpdatedAt((prev) => ({
+          ...prev,
+          [peerLower]: row.created_at,
+        }))
+      }
       setSecretPeers((prev) => ({ ...prev, [peerLower]: row.created_at }))
     }
     const handleRemove = (row: { address_a: string; address_b: string }) => {
@@ -918,8 +948,16 @@ function App() {
   }, [hiddenPeers])
 
   useEffect(() => {
+    hiddenSecretPeersRef.current = hiddenSecretPeers
+  }, [hiddenSecretPeers])
+
+  useEffect(() => {
     peerVisibilityUpdatedAtRef.current = peerVisibilityUpdatedAt
   }, [peerVisibilityUpdatedAt])
+
+  useEffect(() => {
+    secretVisibilityUpdatedAtRef.current = secretVisibilityUpdatedAt
+  }, [secretVisibilityUpdatedAt])
 
   useEffect(() => {
     customNamesRef.current = customNames
@@ -1067,17 +1105,17 @@ function App() {
     const cards: { peer: string; secret: boolean }[] = []
     base.forEach((peerLower) => {
       cards.push({ peer: peerLower, secret: false })
-      if (secretPeers[peerLower]) {
+      if (secretPeers[peerLower] && !hiddenSecretPeers.includes(peerLower)) {
         cards.push({ peer: peerLower, secret: true })
       }
     })
     Object.keys(secretPeers).forEach((peerLower) => {
-      if (!base.has(peerLower)) {
+      if (!base.has(peerLower) && !hiddenSecretPeers.includes(peerLower)) {
         cards.push({ peer: peerLower, secret: true })
       }
     })
     return cards
-  }, [peers, secretPeers])
+  }, [peers, secretPeers, hiddenSecretPeers])
 
   useEffect(() => {
     const targets = new Set<string>()
@@ -1362,6 +1400,8 @@ function App() {
         customAvatars?: Record<string, string | null>
         hiddenPeers?: string[]
         peerVisibilityUpdatedAt?: Record<string, string>
+        hiddenSecretPeers?: string[]
+        secretVisibilityUpdatedAt?: Record<string, string>
         lastReadByPeer?: Record<string, string>
         readReceiptsByPeer?: Record<string, string>
       }
@@ -1376,6 +1416,8 @@ function App() {
       setCustomAvatars(parsed.customAvatars ?? {})
       setHiddenPeers(parsed.hiddenPeers ?? [])
       setPeerVisibilityUpdatedAt(parsed.peerVisibilityUpdatedAt ?? {})
+      setHiddenSecretPeers(parsed.hiddenSecretPeers ?? [])
+      setSecretVisibilityUpdatedAt(parsed.secretVisibilityUpdatedAt ?? {})
       setLastReadByPeer(parsed.lastReadByPeer ?? {})
       setReadReceiptsByPeer(parsed.readReceiptsByPeer ?? {})
       lastScannedBlock.current = parsed.lastScannedBlock
@@ -1390,6 +1432,8 @@ function App() {
       setCustomAvatars({})
       setHiddenPeers([])
       setPeerVisibilityUpdatedAt({})
+      setHiddenSecretPeers([])
+      setSecretVisibilityUpdatedAt({})
       setLastReadByPeer({})
       setReadReceiptsByPeer({})
     }
@@ -1432,6 +1476,27 @@ function App() {
     }
     derive()
   }, [chatKeySaved, address, activePeer, activePeerValid])
+
+  useEffect(() => {
+    if (!address || !activePeerValid || !activeSecret) return
+    const own = address.toLowerCase()
+    const peer = activePeer.toLowerCase()
+    setMessages((prev) => {
+      let changed = false
+      const next = prev.map((message) => {
+        const from = message.from.toLowerCase()
+        const to = message.to.toLowerCase()
+        const pairMatch =
+          (from === own && to === peer) || (from === peer && to === own)
+        if (!pairMatch) return message
+        if (!message.payload.startsWith(SECRET_ENCRYPTED_PREFIX)) return message
+        if (message.text === 'Encrypted message') return message
+        changed = true
+        return { ...message, text: 'Encrypted message' }
+      })
+      return changed ? next : prev
+    })
+  }, [address, activePeer, activePeerValid, activeSecret, chatKeySaved])
 
   // Auto-save key is handled in generation effect
   useEffect(() => {
@@ -1501,6 +1566,8 @@ function App() {
       customAvatars,
       hiddenPeers,
       peerVisibilityUpdatedAt,
+      hiddenSecretPeers,
+      secretVisibilityUpdatedAt,
       lastReadByPeer,
       readReceiptsByPeer,
     }
@@ -1514,6 +1581,8 @@ function App() {
     customAvatars,
     hiddenPeers,
     peerVisibilityUpdatedAt,
+    hiddenSecretPeers,
+    secretVisibilityUpdatedAt,
     lastReadByPeer,
     readReceiptsByPeer,
   ])
@@ -1572,6 +1641,40 @@ function App() {
     [],
   )
 
+  const applySecretVisibility = useCallback(
+    (
+      peer: string,
+      hidden: boolean,
+      updatedAt: string,
+      options?: { force?: boolean },
+    ) => {
+      const peerLower = peer.toLowerCase()
+      const current = secretVisibilityUpdatedAtRef.current[peerLower] ?? '1970-01-01'
+      if (!options?.force && updatedAt <= current) return
+      secretVisibilityUpdatedAtRef.current = {
+        ...secretVisibilityUpdatedAtRef.current,
+        [peerLower]: updatedAt,
+      }
+      setSecretVisibilityUpdatedAt((prev) => {
+        const existing = prev[peerLower] ?? '1970-01-01'
+        if (!options?.force && updatedAt <= existing) return prev
+        return { ...prev, [peerLower]: updatedAt }
+      })
+      setHiddenSecretPeers((prev) => {
+        if (hidden) {
+          if (prev.includes(peerLower)) return prev
+          return [...prev, peerLower]
+        }
+        if (!prev.includes(peerLower)) return prev
+        return prev.filter((p) => p !== peerLower)
+      })
+      if (hidden && activeSecretRef.current && activePeerRef.current === peerLower) {
+        setActiveSecret(false)
+      }
+    },
+    [],
+  )
+
   const ingestMessages = useCallback(
     async (rows: SupabaseMessage[], source?: string) => {
       if (!rows.length || !address) return
@@ -1621,6 +1724,18 @@ function App() {
             setSecretPeers((prev) =>
               prev[peerLower] ? prev : { ...prev, [peerLower]: m.createdAt },
             )
+            const current =
+              secretVisibilityUpdatedAtRef.current[peerLower] ?? '1970-01-01'
+            if (m.createdAt > current) {
+              setHiddenSecretPeers((prev) =>
+                prev.filter((peer) => peer !== peerLower),
+              )
+              setSecretVisibilityUpdatedAt((prev) => ({
+                ...prev,
+                [peerLower]: m.createdAt,
+              }))
+              emitSecretVisibility(peerLower, false, m.createdAt)
+            }
             if (supabase) {
               const [addressA, addressB] = [addressLower, peerLower].sort()
               void supabase
@@ -1708,7 +1823,7 @@ function App() {
         applyPeerVisibility(sender, false, createdAt)
       })
     },
-    [address, applyPeerVisibility, syncLog],
+    [address, applyPeerVisibility, emitSecretVisibility, syncLog],
   )
 
   const loadOlderMessages = useCallback(async () => {
@@ -2243,6 +2358,23 @@ function App() {
           { force: true },
         )
       })
+      .on('broadcast', { event: 'secret_visibility' }, (payload) => {
+        const data = payload.payload as {
+          from?: string
+          to?: string
+          peer?: string
+          hidden?: boolean
+          updatedAt?: string
+        }
+        if (!data?.from || !data?.to || !data.peer) return
+        if (data.to.toLowerCase() !== addressLower) return
+        applySecretVisibility(
+          data.peer,
+          Boolean(data.hidden),
+          data.updatedAt ?? new Date().toISOString(),
+          { force: true },
+        )
+      })
       .on('broadcast', { event: 'message_hint' }, (payload) => {
         const data = payload.payload as {
           from?: string
@@ -2282,6 +2414,8 @@ function App() {
             deviceId: data.deviceId,
             hiddenPeers: hiddenPeersRef.current,
             peerVisibilityUpdatedAt: peerVisibilityUpdatedAtRef.current,
+            hiddenSecretPeers: hiddenSecretPeersRef.current,
+            secretVisibilityUpdatedAt: secretVisibilityUpdatedAtRef.current,
             customNames: customNamesRef.current,
             customAvatars: customAvatarsRef.current,
           },
@@ -2294,6 +2428,8 @@ function App() {
           deviceId?: string
           hiddenPeers?: string[]
           peerVisibilityUpdatedAt?: Record<string, string>
+          hiddenSecretPeers?: string[]
+          secretVisibilityUpdatedAt?: Record<string, string>
           customNames?: Record<string, string | null>
           customAvatars?: Record<string, string | null>
         }
@@ -2316,6 +2452,26 @@ function App() {
         visibilityPeers.forEach((peer) => {
           const updatedAt = incomingUpdatedAt[peer] ?? '1970-01-01'
           applyPeerVisibility(peer, incomingHidden.has(peer), updatedAt, {
+            force: true,
+          })
+        })
+        const incomingSecretHidden = new Set(
+          Array.isArray(data.hiddenSecretPeers)
+            ? data.hiddenSecretPeers.map((peer) => peer.toLowerCase())
+            : [],
+        )
+        const incomingSecretUpdatedAt =
+          data.secretVisibilityUpdatedAt &&
+          typeof data.secretVisibilityUpdatedAt === 'object'
+            ? data.secretVisibilityUpdatedAt
+            : {}
+        const secretPeers = new Set([
+          ...Object.keys(incomingSecretUpdatedAt),
+          ...incomingSecretHidden,
+        ])
+        secretPeers.forEach((peer) => {
+          const updatedAt = incomingSecretUpdatedAt[peer] ?? '1970-01-01'
+          applySecretVisibility(peer, incomingSecretHidden.has(peer), updatedAt, {
             force: true,
           })
         })
@@ -2345,7 +2501,7 @@ function App() {
       channel.unsubscribe()
       signalsChannelRef.current = null
     }
-  }, [address, applyPeerVisibility, fetchMessageUpdates, syncLog])
+  }, [address, applyPeerVisibility, applySecretVisibility, fetchMessageUpdates, syncLog])
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -3050,7 +3206,8 @@ function App() {
               peerCards.map((card) => {
                 const peerLower = card.peer.toLowerCase()
                 const isSecretCard = card.secret
-                const hasSecret = Boolean(secretPeers[peerLower])
+                const hasSecret =
+                  Boolean(secretPeers[peerLower]) && !hiddenSecretPeers.includes(peerLower)
                 const isActive =
                   activePeer.toLowerCase() === peerLower &&
                   activeSecret === isSecretCard
@@ -3201,6 +3358,29 @@ function App() {
                 {activePeerValid
                   ? displayNames[activePeerLower] || shorten(activePeer)
                   : t.chatTitle}
+                {activePeerValid && activeSecret && (
+                  <span className="chat__title-lock" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                      <rect
+                        x="6"
+                        y="10"
+                        width="12"
+                        height="9"
+                        rx="2.2"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.6"
+                      />
+                      <path
+                        d="M8 10V7a4 4 0 0 1 8 0v3"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.6"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                  </span>
+                )}
               </div>
               <div
                 className={`chat__typing ${
