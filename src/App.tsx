@@ -71,9 +71,10 @@ const dict = {
     secretPassphrasePlaceholder: 'Shared password',
     secretPassphraseSave: 'Save',
     secretInfoTitle: 'Secret mode',
-    secretInfoLine1: 'Messages in secret chats are end-to-end encrypted.',
-    secretInfoLine2: 'A shared password is stored only on this device.',
-    secretInfoLine3: 'Change or clear the password to blur messages instantly.',
+    secretInfoLine1: 'Secret chats use E2EE, which is safer than regular chatting.',
+    secretInfoLine2: 'Both sides must set the same password to decrypt messages.',
+    secretInfoLine3: 'The password is stored only on this device and never synced.',
+    secretInfoLine4: 'Change or clear the password to blur messages instantly.',
     send: 'Send',
     signing: 'Signing…',
     seen: 'Seen',
@@ -121,9 +122,10 @@ const dict = {
     secretPassphrasePlaceholder: '共享密码',
     secretPassphraseSave: '保存',
     secretInfoTitle: '密聊模式',
-    secretInfoLine1: '密聊消息采用端到端加密。',
-    secretInfoLine2: '共享密码只保存在本设备。',
-    secretInfoLine3: '修改或清除密码会立即模糊消息。',
+    secretInfoLine1: '密聊使用端到端加密，比普通聊天更安全。',
+    secretInfoLine2: '双方必须设置相同密码才能解密消息。',
+    secretInfoLine3: '密码只保存在本设备，不会同步。',
+    secretInfoLine4: '修改或清除密码会立即模糊消息。',
     send: '发送',
     signing: '签名中…',
     seen: '已读',
@@ -171,9 +173,10 @@ const dict = {
     secretPassphrasePlaceholder: '공유 비밀번호',
     secretPassphraseSave: '저장',
     secretInfoTitle: '비밀 모드',
-    secretInfoLine1: '비밀 채팅 메시지는 종단 간 암호화됩니다.',
-    secretInfoLine2: '공유 비밀번호는 이 기기에만 저장됩니다.',
-    secretInfoLine3: '비밀번호를 변경하거나 지우면 즉시 블러 처리됩니다.',
+    secretInfoLine1: '비밀 채팅은 E2EE를 사용해 일반 채팅보다 안전합니다.',
+    secretInfoLine2: '양쪽이 같은 비밀번호를 설정해야 복호화됩니다.',
+    secretInfoLine3: '비밀번호는 이 기기에만 저장되고 동기화되지 않습니다.',
+    secretInfoLine4: '비밀번호를 변경하거나 지우면 즉시 블러 처리됩니다.',
     send: '보내기',
     signing: '서명 중…',
     seen: '읽음',
@@ -221,9 +224,10 @@ const dict = {
     secretPassphrasePlaceholder: '共有パスワード',
     secretPassphraseSave: '保存',
     secretInfoTitle: 'シークレットモード',
-    secretInfoLine1: 'シークレットチャットはエンドツーエンド暗号化です。',
-    secretInfoLine2: '共有パスワードはこの端末にのみ保存されます。',
-    secretInfoLine3: 'パスワードを変更または削除すると即座にぼかされます。',
+    secretInfoLine1: 'シークレットチャットはE2EEで通常より安全です。',
+    secretInfoLine2: '双方が同じパスワードを設定すると復号できます。',
+    secretInfoLine3: 'パスワードはこの端末にのみ保存され同期されません。',
+    secretInfoLine4: 'パスワードを変更または削除すると即座にぼかされます。',
     send: '送信',
     signing: '署名中…',
     seen: '既読',
@@ -2708,6 +2712,10 @@ function App() {
       }
       return { ...prev, [peerLower]: next }
     })
+    setSecretPassphraseDraft(next)
+    if (activeSecret) {
+      setChatKeySaved(next)
+    }
     setError(null)
   }
 
@@ -3314,7 +3322,15 @@ function App() {
                       <div className="peer__unread">!</div>
                     )}
                     {isSecretCard && (
-                      <div className="peer__secret-lock">
+                      <button
+                        className="peer__secret-lock peer__secret-lock--button"
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          setSecretInfoOpen(true)
+                        }}
+                        aria-label={t.secretInfoTitle}
+                        title={t.secretInfoTitle}
+                      >
                         <svg viewBox="0 0 24 24" aria-hidden="true">
                           <rect
                             x="6"
@@ -3334,7 +3350,7 @@ function App() {
                             strokeLinecap="round"
                           />
                         </svg>
-                      </div>
+                      </button>
                     )}
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px', width: '100%', overflow: 'hidden' }}>
                       <AbstractProfile
@@ -3689,6 +3705,7 @@ function App() {
               <div className="secret-info__line">{t.secretInfoLine1}</div>
               <div className="secret-info__line">{t.secretInfoLine2}</div>
               <div className="secret-info__line">{t.secretInfoLine3}</div>
+              <div className="secret-info__line">{t.secretInfoLine4}</div>
             </div>
           </div>
         </div>

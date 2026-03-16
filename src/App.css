@@ -708,6 +708,10 @@ html, body {
   z-index: 9;
 }
 
+.peer__secret-lock--button {
+  cursor: pointer;
+}
+
 .peer__secret-lock svg {
   width: 14px;
   height: 14px;
@@ -1228,14 +1232,6 @@ html, body {
 
   .input--address {
     height: 40px;
-  }
-
-  .textarea--composer {
-    text-align: center;
-  }
-
-  .textarea--composer::placeholder {
-    text-align: center;
   }
 
   .chat__header {
