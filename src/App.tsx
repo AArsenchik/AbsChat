@@ -70,6 +70,10 @@ const dict = {
     composerPlaceholder: 'Your message...',
     secretPassphrasePlaceholder: 'Shared password',
     secretPassphraseSave: 'Save',
+    secretInfoTitle: 'Secret mode',
+    secretInfoLine1: 'Messages in secret chats are end-to-end encrypted.',
+    secretInfoLine2: 'A shared password is stored only on this device.',
+    secretInfoLine3: 'Change or clear the password to blur messages instantly.',
     send: 'Send',
     signing: 'Signing…',
     seen: 'Seen',
@@ -116,6 +120,10 @@ const dict = {
     composerPlaceholder: '你的消息…',
     secretPassphrasePlaceholder: '共享密码',
     secretPassphraseSave: '保存',
+    secretInfoTitle: '密聊模式',
+    secretInfoLine1: '密聊消息采用端到端加密。',
+    secretInfoLine2: '共享密码只保存在本设备。',
+    secretInfoLine3: '修改或清除密码会立即模糊消息。',
     send: '发送',
     signing: '签名中…',
     seen: '已读',
@@ -162,6 +170,10 @@ const dict = {
     composerPlaceholder: '메시지…',
     secretPassphrasePlaceholder: '공유 비밀번호',
     secretPassphraseSave: '저장',
+    secretInfoTitle: '비밀 모드',
+    secretInfoLine1: '비밀 채팅 메시지는 종단 간 암호화됩니다.',
+    secretInfoLine2: '공유 비밀번호는 이 기기에만 저장됩니다.',
+    secretInfoLine3: '비밀번호를 변경하거나 지우면 즉시 블러 처리됩니다.',
     send: '보내기',
     signing: '서명 중…',
     seen: '읽음',
@@ -208,6 +220,10 @@ const dict = {
     composerPlaceholder: 'メッセージ…',
     secretPassphrasePlaceholder: '共有パスワード',
     secretPassphraseSave: '保存',
+    secretInfoTitle: 'シークレットモード',
+    secretInfoLine1: 'シークレットチャットはエンドツーエンド暗号化です。',
+    secretInfoLine2: '共有パスワードはこの端末にのみ保存されます。',
+    secretInfoLine3: 'パスワードを変更または削除すると即座にぼかされます。',
     send: '送信',
     signing: '署名中…',
     seen: '既読',
@@ -697,6 +713,7 @@ function App() {
   const [peerVisibilityUpdatedAt, setPeerVisibilityUpdatedAt] = useState<Record<string, string>>({})
   const [hiddenSecretPeers, setHiddenSecretPeers] = useState<string[]>([])
   const [secretVisibilityUpdatedAt, setSecretVisibilityUpdatedAt] = useState<Record<string, string>>({})
+  const [secretInfoOpen, setSecretInfoOpen] = useState(false)
 
   const syncLog = useCallback(
     (event: string, data?: Record<string, unknown>) => {
@@ -2665,6 +2682,24 @@ function App() {
     if (!activePeerValid) return
     const peerLower = activePeer.toLowerCase()
     const next = secretPassphraseDraft.trim()
+    if (activeSecret && address) {
+      const own = address.toLowerCase()
+      setMessages((prev) => {
+        let changed = false
+        const nextMessages = prev.map((message) => {
+          const from = message.from.toLowerCase()
+          const to = message.to.toLowerCase()
+          const pairMatch =
+            (from === own && to === peerLower) || (from === peerLower && to === own)
+          if (!pairMatch) return message
+          if (!message.payload.startsWith(SECRET_ENCRYPTED_PREFIX)) return message
+          if (message.text === 'Encrypted message') return message
+          changed = true
+          return { ...message, text: 'Encrypted message' }
+        })
+        return changed ? nextMessages : prev
+      })
+    }
     setSecretPassphrases((prev) => {
       if (!next) {
         const updated = { ...prev }
@@ -3359,8 +3394,13 @@ function App() {
                   ? displayNames[activePeerLower] || shorten(activePeer)
                   : t.chatTitle}
                 {activePeerValid && activeSecret && (
-                  <span className="chat__title-lock" aria-hidden="true">
-                    <svg viewBox="0 0 24 24">
+                  <button
+                    className="chat__title-lock chat__title-lock--button"
+                    onClick={() => setSecretInfoOpen(true)}
+                    aria-label={t.secretInfoTitle}
+                    title={t.secretInfoTitle}
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
                       <rect
                         x="6"
                         y="10"
@@ -3379,7 +3419,7 @@ function App() {
                         strokeLinecap="round"
                       />
                     </svg>
-                  </span>
+                  </button>
                 )}
               </div>
               <div
@@ -3628,6 +3668,27 @@ function App() {
                   {t.openDocs}
                 </a>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {secretInfoOpen && (
+        <div className="modal">
+          <div className="modal__overlay" onClick={() => setSecretInfoOpen(false)} />
+          <div className="modal__content">
+            <div className="modal__header">
+              <div className="modal__title">{t.secretInfoTitle}</div>
+              <button
+                className="btn btn--ghost settings__control settings__control--sm modal__close modal__close--plain"
+                onClick={() => setSecretInfoOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+            <div className="secret-info">
+              <div className="secret-info__line">{t.secretInfoLine1}</div>
+              <div className="secret-info__line">{t.secretInfoLine2}</div>
+              <div className="secret-info__line">{t.secretInfoLine3}</div>
             </div>
           </div>
         </div>

@@ -180,6 +180,15 @@ html, body {
   font-size: 18px;
 }
 
+.secret-info {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
 .modal__close--plain {
   transition: none;
 }
@@ -821,6 +830,12 @@ html, body {
   flex-shrink: 0;
 }
 
+.chat__title-lock--button {
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
 .chat__title-lock svg {
   width: 12px;
   height: 12px;
@@ -1213,6 +1228,14 @@ html, body {
 
   .input--address {
     height: 40px;
+  }
+
+  .textarea--composer {
+    text-align: center;
+  }
+
+  .textarea--composer::placeholder {
+    text-align: center;
   }
 
   .chat__header {
