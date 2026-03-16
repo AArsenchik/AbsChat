@@ -373,6 +373,7 @@ const encoder = new TextEncoder()
 const decoder = new TextDecoder()
 const ENCRYPTED_PREFIX = 'enc:v1:'
 const ENCRYPTED_V2_PREFIX = 'enc:v2:'
+const SECRET_ENCRYPTED_PREFIX = 'sec:v1:'
 const GIF_PREFIX = 'gif:'
 const GIF_FILES = ['ppp1.mp4', 'ppp2.mp4', 'ppp3.mp4'] as const
 const MAX_AVATAR_BYTES = 512 * 1024
@@ -384,11 +385,21 @@ const toBase64 = (bytes: Uint8Array) =>
 const fromBase64 = (value: string) =>
   Uint8Array.from(atob(value), (char) => char.charCodeAt(0))
 const isEncryptedPayload = (payload: string) =>
-  payload.startsWith(ENCRYPTED_PREFIX) || payload.startsWith(ENCRYPTED_V2_PREFIX)
+  payload.startsWith(ENCRYPTED_PREFIX) ||
+  payload.startsWith(ENCRYPTED_V2_PREFIX) ||
+  payload.startsWith(SECRET_ENCRYPTED_PREFIX)
 
 const parseEncryptedV1Payload = (payload: string) => {
   if (!payload.startsWith(ENCRYPTED_PREFIX)) return null
   const raw = payload.slice(ENCRYPTED_PREFIX.length)
+  const [ivBase64, dataBase64] = raw.split(':')
+  if (!ivBase64 || !dataBase64) return null
+  return { ivBase64, dataBase64 }
+}
+
+const parseSecretPayload = (payload: string) => {
+  if (!payload.startsWith(SECRET_ENCRYPTED_PREFIX)) return null
+  const raw = payload.slice(SECRET_ENCRYPTED_PREFIX.length)
   const [ivBase64, dataBase64] = raw.split(':')
   if (!ivBase64 || !dataBase64) return null
   return { ivBase64, dataBase64 }
@@ -513,6 +524,28 @@ const encryptPayload = async (
   return `${ENCRYPTED_PREFIX}${toBase64(iv)}:${toBase64(new Uint8Array(encrypted))}`
 }
 
+const encryptSecretPayload = async (
+  text: string,
+  passphrase: string,
+  address: string,
+  peer: string,
+) => {
+  if (!crypto?.subtle) {
+    throw new Error('Encryption is not supported in this browser')
+  }
+  const salt = await getConversationSalt(address, peer)
+  const key = await deriveKey(passphrase, salt)
+  const iv = crypto.getRandomValues(new Uint8Array(12))
+  const encrypted = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv },
+    key,
+    encoder.encode(text),
+  )
+  return `${SECRET_ENCRYPTED_PREFIX}${toBase64(iv)}:${toBase64(
+    new Uint8Array(encrypted),
+  )}`
+}
+
 const decryptPayloadWithKey = async (
   payload: string,
   key: CryptoKey
@@ -520,6 +553,26 @@ const decryptPayloadWithKey = async (
   if (!isEncryptedPayload(payload)) return payload
   if (!crypto?.subtle) return null
   const parsed = parseEncryptedV1Payload(payload)
+  if (!parsed) return null
+  try {
+    const decrypted = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: fromBase64(parsed.ivBase64) },
+      key,
+      fromBase64(parsed.dataBase64),
+    )
+    return decoder.decode(decrypted)
+  } catch {
+    return null
+  }
+}
+
+const decryptSecretPayloadWithKey = async (
+  payload: string,
+  key: CryptoKey
+) => {
+  if (!payload.startsWith(SECRET_ENCRYPTED_PREFIX)) return null
+  if (!crypto?.subtle) return null
+  const parsed = parseSecretPayload(payload)
   if (!parsed) return null
   try {
     const decrypted = await crypto.subtle.decrypt(
@@ -1248,8 +1301,10 @@ function App() {
         const pairMatch =
           (from === own && to === peer) || (from === peer && to === own)
         if (!pairMatch) return false
-        if (activeSecret) return isEncryptedPayload(message.payload)
-        return !isEncryptedPayload(message.payload)
+        if (activeSecret) {
+          return message.payload.startsWith(SECRET_ENCRYPTED_PREFIX)
+        }
+        return !message.payload.startsWith(SECRET_ENCRYPTED_PREFIX)
       })
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
   }, [messages, address, activePeer, activePeerValid, activeSecret])
@@ -1341,8 +1396,19 @@ function App() {
   }, [address])
 
   useEffect(() => {
-    if (!address || !activePeerValid || !activeSecret) {
+    if (!address || !activePeerValid) {
       setChatKeySaved('')
+      return
+    }
+    if (!activeSecret) {
+      const generateSharedKey = async () => {
+        const [a, b] = [address.toLowerCase(), activePeer.toLowerCase()].sort()
+        const seed = `${a}:${b}:shared-secret-v1`
+        const hash = await crypto.subtle.digest('SHA-256', encoder.encode(seed))
+        const key = toBase64(new Uint8Array(hash))
+        setChatKeySaved(key)
+      }
+      generateSharedKey()
       return
     }
     const peerLower = activePeer.toLowerCase()
@@ -1373,7 +1439,7 @@ function App() {
   }, [address, activePeer, activePeerValid, chatKeySaved])
 
   useEffect(() => {
-    if (!address || !activePeerValid || !activeSecret || !conversationKey) return
+    if (!address || !activePeerValid || !conversationKey) return
     let cancelled = false
     const own = address.toLowerCase()
     const activePeerLower = activePeer.toLowerCase()
@@ -1382,6 +1448,10 @@ function App() {
       const needed = messages
         .map((m, index) => ({ m, index }))
         .filter(({ m }) => {
+          const wantsSecret = activeSecret
+          const isSecretPayload = m.payload.startsWith(SECRET_ENCRYPTED_PREFIX)
+          if (wantsSecret && !isSecretPayload) return false
+          if (!wantsSecret && isSecretPayload) return false
           if (!isEncryptedPayload(m.payload)) return false
           if (m.text !== 'Encrypted message') return false
           const from = m.from.toLowerCase()
@@ -1399,7 +1469,9 @@ function App() {
 
       await Promise.all(
         needed.map(async ({ m, index }) => {
-          const decrypted = await decryptPayloadWithKey(m.payload, conversationKey)
+          const decrypted = activeSecret
+            ? await decryptSecretPayloadWithKey(m.payload, conversationKey)
+            : await decryptPayloadWithKey(m.payload, conversationKey)
           if (decrypted && decrypted !== m.text) {
             updates[index] = { ...m, text: decrypted }
             changed = true
@@ -1541,19 +1613,58 @@ function App() {
       const mapped = await Promise.all(
         rows.map(async (row) => {
           const m = toMessage(row)
+          if (m.payload.startsWith(SECRET_ENCRYPTED_PREFIX)) {
+            const peerLower =
+              m.from.toLowerCase() === addressLower
+                ? m.to.toLowerCase()
+                : m.from.toLowerCase()
+            setSecretPeers((prev) =>
+              prev[peerLower] ? prev : { ...prev, [peerLower]: m.createdAt },
+            )
+            if (supabase) {
+              const [addressA, addressB] = [addressLower, peerLower].sort()
+              void supabase
+                .from('secret_chats')
+                .upsert(
+                  [
+                    {
+                      address_a: addressA,
+                      address_b: addressB,
+                      chain_id: abstract.id,
+                      created_at: m.createdAt,
+                      created_by: addressLower,
+                    },
+                  ],
+                  { onConflict: 'address_a,address_b,chain_id' },
+                )
+            }
+          }
           const currentKey = conversationKeyRef.current
           const activePeer = activePeerRef.current
           if (
             activePeer &&
-            activeSecretRef.current &&
-            isEncryptedPayload(m.payload) &&
             m.text === 'Encrypted message' &&
             (m.from.toLowerCase() === activePeer ||
               m.to.toLowerCase() === activePeer)
           ) {
             if (currentKey) {
-              const decrypted = await decryptPayloadWithKey(m.payload, currentKey)
-              if (decrypted) m.text = decrypted
+              if (
+                activeSecretRef.current &&
+                m.payload.startsWith(SECRET_ENCRYPTED_PREFIX)
+              ) {
+                const decrypted = await decryptSecretPayloadWithKey(
+                  m.payload,
+                  currentKey,
+                )
+                if (decrypted) m.text = decrypted
+              }
+              if (
+                !activeSecretRef.current &&
+                m.payload.startsWith(ENCRYPTED_PREFIX)
+              ) {
+                const decrypted = await decryptPayloadWithKey(m.payload, currentKey)
+                if (decrypted) m.text = decrypted
+              }
             }
           }
           return m
@@ -2450,14 +2561,28 @@ function App() {
             conversationKey,
             encoder.encode(text),
           )
-          payload = `${ENCRYPTED_PREFIX}${toBase64(iv)}:${toBase64(
+          payload = `${SECRET_ENCRYPTED_PREFIX}${toBase64(iv)}:${toBase64(
             new Uint8Array(encrypted),
           )}`
         } else {
-          payload = await encryptPayload(text, key, address, activePeer)
+          payload = await encryptSecretPayload(text, key, address, activePeer)
         }
       } else {
-        payload = text
+        if (conversationKey) {
+          const iv = crypto.getRandomValues(new Uint8Array(12))
+          const encrypted = await crypto.subtle.encrypt(
+            { name: 'AES-GCM', iv },
+            conversationKey,
+            encoder.encode(text),
+          )
+          payload = `${ENCRYPTED_PREFIX}${toBase64(iv)}:${toBase64(
+            new Uint8Array(encrypted),
+          )}`
+        } else if (key) {
+          payload = await encryptPayload(text, key, address, activePeer)
+        } else {
+          payload = text
+        }
       }
     } catch (err) {
       setError(getErrorMessage(err))
