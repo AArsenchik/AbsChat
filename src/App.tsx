@@ -779,6 +779,7 @@ function App() {
     [],
   )
 
+
   const handleCreateSecretChat = useCallback(
     async (peerLower: string) => {
       if (!supabase || !address) return
@@ -786,6 +787,24 @@ function App() {
       const [addressA, addressB] = [addressLower, peerLower].sort()
       const createdAt = new Date().toISOString()
       try {
+        try {
+          await supabase
+            .from('secret_visibility')
+            .upsert(
+              [
+                {
+                  owner_address: addressLower,
+                  peer_address: peerLower,
+                  chain_id: abstract.id,
+                  hidden: false,
+                  updated_at: createdAt,
+                },
+              ],
+              { onConflict: 'owner_address,peer_address,chain_id' },
+            )
+        } catch (err) {
+          syncLog('secret_visibility_create_error', { error: getErrorMessage(err) })
+        }
         await supabase
           .from('secret_chats')
           .upsert(
@@ -830,6 +849,27 @@ function App() {
       if (activeSecret && activePeer.toLowerCase() === peerLower) {
         setActiveSecret(false)
       }
+      if (supabase) {
+        const addressLower = address.toLowerCase()
+        try {
+          await supabase
+            .from('secret_visibility')
+            .upsert(
+              [
+                {
+                  owner_address: addressLower,
+                  peer_address: peerLower,
+                  chain_id: abstract.id,
+                  hidden: true,
+                  updated_at: updatedAt,
+                },
+              ],
+              { onConflict: 'owner_address,peer_address,chain_id' },
+            )
+        } catch (err) {
+          syncLog('secret_visibility_remove_error', { error: getErrorMessage(err) })
+        }
+      }
       emitSecretVisibility(peerLower, true, updatedAt)
       syncLog('secret_chat_remove', { peer: peerLower })
     },
@@ -848,121 +888,6 @@ function App() {
     activeSecretRef.current = activeSecret
   }, [activeSecret])
 
-  useEffect(() => {
-    if (!supabase || !address) {
-      setSecretPeers({})
-      return
-    }
-    const supabaseClient = supabase
-    const addressLower = address.toLowerCase()
-    loadSecretChats(addressLower)
-    const channel = supabaseClient.channel(`chat:secrets:${addressLower}`)
-    const handleRow = (row: {
-      address_a: string
-      address_b: string
-      created_at: string
-    }) => {
-      const peerLower =
-        row.address_a.toLowerCase() === addressLower
-          ? row.address_b.toLowerCase()
-          : row.address_a.toLowerCase()
-      const current = secretVisibilityUpdatedAtRef.current[peerLower] ?? '1970-01-01'
-      if (row.created_at > current) {
-        setHiddenSecretPeers((prev) => prev.filter((peer) => peer !== peerLower))
-        setSecretVisibilityUpdatedAt((prev) => ({
-          ...prev,
-          [peerLower]: row.created_at,
-        }))
-      }
-      setSecretPeers((prev) => ({ ...prev, [peerLower]: row.created_at }))
-    }
-    const handleRemove = (row: { address_a: string; address_b: string }) => {
-      const peerLower =
-        row.address_a.toLowerCase() === addressLower
-          ? row.address_b.toLowerCase()
-          : row.address_a.toLowerCase()
-      setSecretPeers((prev) => {
-        const next = { ...prev }
-        delete next[peerLower]
-        return next
-      })
-    }
-    channel
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'secret_chats',
-          filter: `chain_id=eq.${abstract.id},address_a=eq.${addressLower}`,
-        },
-        (payload) =>
-          handleRow(
-            payload.new as {
-              address_a: string
-              address_b: string
-              created_at: string
-            },
-          ),
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'secret_chats',
-          filter: `chain_id=eq.${abstract.id},address_b=eq.${addressLower}`,
-        },
-        (payload) =>
-          handleRow(
-            payload.new as {
-              address_a: string
-              address_b: string
-              created_at: string
-            },
-          ),
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'DELETE',
-          schema: 'public',
-          table: 'secret_chats',
-          filter: `chain_id=eq.${abstract.id},address_a=eq.${addressLower}`,
-        },
-        (payload) =>
-          handleRemove(
-            payload.old as {
-              address_a: string
-              address_b: string
-            },
-          ),
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'DELETE',
-          schema: 'public',
-          table: 'secret_chats',
-          filter: `chain_id=eq.${abstract.id},address_b=eq.${addressLower}`,
-        },
-        (payload) =>
-          handleRemove(
-            payload.old as {
-              address_a: string
-              address_b: string
-            },
-          ),
-      )
-      .subscribe()
-    secretChatsChannelRef.current = channel
-    return () => {
-      if (secretChatsChannelRef.current) {
-        supabaseClient.removeChannel(secretChatsChannelRef.current)
-        secretChatsChannelRef.current = null
-      }
-    }
-  }, [address, loadSecretChats])
 
   useEffect(() => {
     hiddenPeersRef.current = hiddenPeers
@@ -1705,6 +1630,198 @@ function App() {
     },
     [],
   )
+
+  const loadSecretVisibility = useCallback(
+    async (addressLower: string) => {
+      if (!supabase) return
+      try {
+        const { data, error } = await supabase
+          .from('secret_visibility')
+          .select('peer_address, hidden, updated_at, chain_id, owner_address')
+          .eq('chain_id', abstract.id)
+          .eq('owner_address', addressLower)
+        if (error || !data) return
+        data.forEach((row) => {
+          const item = row as {
+            peer_address: string
+            hidden: boolean
+            updated_at: string
+          }
+          if (!item.peer_address || !item.updated_at) return
+          applySecretVisibility(
+            item.peer_address,
+            Boolean(item.hidden),
+            item.updated_at,
+            { force: true },
+          )
+        })
+      } catch {
+        return
+      }
+    },
+    [applySecretVisibility],
+  )
+
+  useEffect(() => {
+    if (!supabase || !address) {
+      setSecretPeers({})
+      return
+    }
+    const supabaseClient = supabase
+    const addressLower = address.toLowerCase()
+    loadSecretVisibility(addressLower)
+    loadSecretChats(addressLower)
+    const channel = supabaseClient.channel(`chat:secrets:${addressLower}`)
+    const handleRow = (row: {
+      address_a: string
+      address_b: string
+      created_at: string
+    }) => {
+      const peerLower =
+        row.address_a.toLowerCase() === addressLower
+          ? row.address_b.toLowerCase()
+          : row.address_a.toLowerCase()
+      const current = secretVisibilityUpdatedAtRef.current[peerLower] ?? '1970-01-01'
+      if (row.created_at > current) {
+        setHiddenSecretPeers((prev) => prev.filter((peer) => peer !== peerLower))
+        setSecretVisibilityUpdatedAt((prev) => ({
+          ...prev,
+          [peerLower]: row.created_at,
+        }))
+      }
+      setSecretPeers((prev) => ({ ...prev, [peerLower]: row.created_at }))
+    }
+    const handleRemove = (row: { address_a: string; address_b: string }) => {
+      const peerLower =
+        row.address_a.toLowerCase() === addressLower
+          ? row.address_b.toLowerCase()
+          : row.address_a.toLowerCase()
+      setSecretPeers((prev) => {
+        const next = { ...prev }
+        delete next[peerLower]
+        return next
+      })
+    }
+    const handleVisibilityRow = (row: {
+      peer_address: string
+      hidden: boolean
+      updated_at: string
+    }) => {
+      if (!row.peer_address || !row.updated_at) return
+      applySecretVisibility(row.peer_address, Boolean(row.hidden), row.updated_at, {
+        force: true,
+      })
+    }
+    channel
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'secret_chats',
+          filter: `chain_id=eq.${abstract.id},address_a=eq.${addressLower}`,
+        },
+        (payload) =>
+          handleRow(
+            payload.new as {
+              address_a: string
+              address_b: string
+              created_at: string
+            },
+          ),
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'secret_chats',
+          filter: `chain_id=eq.${abstract.id},address_b=eq.${addressLower}`,
+        },
+        (payload) =>
+          handleRow(
+            payload.new as {
+              address_a: string
+              address_b: string
+              created_at: string
+            },
+          ),
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'DELETE',
+          schema: 'public',
+          table: 'secret_chats',
+          filter: `chain_id=eq.${abstract.id},address_a=eq.${addressLower}`,
+        },
+        (payload) =>
+          handleRemove(
+            payload.old as {
+              address_a: string
+              address_b: string
+            },
+          ),
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'DELETE',
+          schema: 'public',
+          table: 'secret_chats',
+          filter: `chain_id=eq.${abstract.id},address_b=eq.${addressLower}`,
+        },
+        (payload) =>
+          handleRemove(
+            payload.old as {
+              address_a: string
+              address_b: string
+            },
+          ),
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'secret_visibility',
+          filter: `chain_id=eq.${abstract.id},owner_address=eq.${addressLower}`,
+        },
+        (payload) =>
+          handleVisibilityRow(
+            payload.new as {
+              peer_address: string
+              hidden: boolean
+              updated_at: string
+            },
+          ),
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'secret_visibility',
+          filter: `chain_id=eq.${abstract.id},owner_address=eq.${addressLower}`,
+        },
+        (payload) =>
+          handleVisibilityRow(
+            payload.new as {
+              peer_address: string
+              hidden: boolean
+              updated_at: string
+            },
+          ),
+      )
+      .subscribe()
+    secretChatsChannelRef.current = channel
+    return () => {
+      if (secretChatsChannelRef.current) {
+        supabaseClient.removeChannel(secretChatsChannelRef.current)
+        secretChatsChannelRef.current = null
+      }
+    }
+  }, [address, loadSecretChats, loadSecretVisibility, applySecretVisibility])
 
   const ingestMessages = useCallback(
     async (rows: SupabaseMessage[], source?: string) => {
@@ -2621,31 +2738,15 @@ function App() {
 
   useEffect(() => {
     if (!address || !activePeerValid) return
-    const own = address.toLowerCase()
     const peerLower = activePeer.toLowerCase()
-    let latest = ''
-    for (const message of messages) {
-      const from = message.from.toLowerCase()
-      const to = message.to.toLowerCase()
-      const pairMatch =
-        (from === own && to === peerLower) || (from === peerLower && to === own)
-      if (!pairMatch) continue
-      if (activeSecret) {
-        if (!message.payload.startsWith(SECRET_ENCRYPTED_PREFIX)) continue
-      } else if (message.payload.startsWith(SECRET_ENCRYPTED_PREFIX)) {
-        continue
-      }
-      if (from !== peerLower) continue
-      if (!latest || message.createdAt > latest) {
-        latest = message.createdAt
-      }
-    }
-    if (!latest) return
-    const current = lastReadByPeer[peerLower] ?? '1970-01-01'
-    if (latest <= current) return
+    const incoming = visibleMessages.filter(
+      (message) => message.from.toLowerCase() === peerLower,
+    )
+    if (incoming.length === 0) return
+    const latest = incoming[incoming.length - 1].createdAt
     setLastReadByPeer((prev) => {
-      const existing = prev[peerLower] ?? '1970-01-01'
-      if (latest <= existing) return prev
+      const current = prev[peerLower] ?? '1970-01-01'
+      if (latest <= current) return prev
       return { ...prev, [peerLower]: latest }
     })
     signalsChannelRef.current?.send({
@@ -2657,7 +2758,7 @@ function App() {
         readAt: latest,
       },
     })
-  }, [address, activePeerValid, activePeer, activeSecret, lastReadByPeer, messages])
+  }, [address, activePeerValid, activePeer, visibleMessages])
 
   const handleRemovePeer = (peer: string) => {
     const confirmed = window.confirm(

@@ -763,7 +763,6 @@ html, body {
 .peer__address {
   display: block;
   font-weight: 600;
-  font-size: 16px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
