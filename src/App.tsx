@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { useAbstractClient, useLoginWithAbstract, useCreateSession } from '@abstract-foundation/agw-react'
-import { useAccount, usePublicClient } from 'wagmi'
+import { useAccount, usePublicClient, useSignMessage } from 'wagmi'
 import { fromHex, isAddress, toHex, parseEther, type Address } from 'viem'
 import { abstract } from 'viem/chains'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
@@ -399,6 +399,10 @@ const GIF_FILES = ['ppp1.mp4', 'ppp2.mp4', 'ppp3.mp4'] as const
 const MAX_AVATAR_BYTES = 512 * 1024
 const AVATAR_MAX_SIDE = 256
 const AVATAR_QUALITY = 0.85
+const SUPABASE_AUTH_TOKEN_KEY = 'supabaseAccessToken'
+const SUPABASE_AUTH_EXP_KEY = 'supabaseAccessTokenExp'
+const SUPABASE_AUTH_ADDRESS_KEY = 'supabaseAccessTokenAddress'
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string | undefined
 
 const toBase64 = (bytes: Uint8Array) =>
   btoa(String.fromCharCode(...Array.from(bytes)))
@@ -649,6 +653,7 @@ function App() {
   const { data: abstractClient } = useAbstractClient()
   const { createSessionAsync, isPending: isCreatingSession } = useCreateSession()
   const publicClient = usePublicClient({ chainId: abstract.id })
+  const { signMessageAsync } = useSignMessage()
 
   const [peerInput, setPeerInput] = useState('')
   const [activePeer, setActivePeer] = useState('')
@@ -718,6 +723,7 @@ function App() {
   const [hiddenSecretPeers, setHiddenSecretPeers] = useState<string[]>([])
   const [secretVisibilityUpdatedAt, setSecretVisibilityUpdatedAt] = useState<Record<string, string>>({})
   const [secretInfoOpen, setSecretInfoOpen] = useState(false)
+  const supabaseAuthInFlightRef = useRef(false)
 
   const syncLog = useCallback(
     (event: string, data?: Record<string, unknown>) => {
@@ -728,6 +734,48 @@ function App() {
     },
     [address],
   )
+
+  const ensureSupabaseAuth = useCallback(async () => {
+    if (!address || !SUPABASE_URL) return
+    const addressLower = address.toLowerCase()
+    const storedToken = localStorage.getItem(SUPABASE_AUTH_TOKEN_KEY)
+    const storedExp = Number(localStorage.getItem(SUPABASE_AUTH_EXP_KEY) ?? '0')
+    const storedAddress = localStorage.getItem(SUPABASE_AUTH_ADDRESS_KEY) ?? ''
+    if (
+      storedToken &&
+      storedAddress === addressLower &&
+      storedExp > Date.now() / 1000 + 60
+    ) {
+      supabase?.realtime.setAuth(storedToken)
+      return
+    }
+    if (supabaseAuthInFlightRef.current) return
+    supabaseAuthInFlightRef.current = true
+    try {
+      const nonce = crypto.randomUUID()
+      const message = `AbsChat login\nAddress: ${addressLower}\nNonce: ${nonce}`
+      const signature = await signMessageAsync({ message })
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/wallet-auth`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address: addressLower, message, signature }),
+      })
+      const data = await response.json()
+      if (!response.ok || !data?.access_token) {
+        throw new Error(data?.error ?? 'Auth failed')
+      }
+      localStorage.setItem(SUPABASE_AUTH_TOKEN_KEY, data.access_token)
+      if (data.expires_at) {
+        localStorage.setItem(SUPABASE_AUTH_EXP_KEY, String(data.expires_at))
+      }
+      localStorage.setItem(SUPABASE_AUTH_ADDRESS_KEY, addressLower)
+      supabase?.realtime.setAuth(data.access_token)
+    } catch (err) {
+      setError(getErrorMessage(err))
+    } finally {
+      supabaseAuthInFlightRef.current = false
+    }
+  }, [address, signMessageAsync])
 
   const emitSecretVisibility = useCallback(
     (peer: string, hidden: boolean, updatedAt: string) => {
@@ -950,6 +998,17 @@ function App() {
   const connected = status === 'connected' && address
   const peerInputValid = peerInput ? isAddress(peerInput) : false
   const activePeerValid = activePeer ? isAddress(activePeer) : false
+
+  useEffect(() => {
+    if (!connected) {
+      localStorage.removeItem(SUPABASE_AUTH_TOKEN_KEY)
+      localStorage.removeItem(SUPABASE_AUTH_EXP_KEY)
+      localStorage.removeItem(SUPABASE_AUTH_ADDRESS_KEY)
+      supabase?.realtime.setAuth()
+      return
+    }
+    void ensureSupabaseAuth()
+  }, [connected, ensureSupabaseAuth])
   const [lang, setLang] = useState<string>(() => {
     const saved = localStorage.getItem('lang')
     return saved || 'en'
