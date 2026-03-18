@@ -735,6 +735,14 @@ function App() {
     [address],
   )
 
+  const handleLogout = useCallback(() => {
+    localStorage.removeItem(SUPABASE_AUTH_TOKEN_KEY)
+    localStorage.removeItem(SUPABASE_AUTH_EXP_KEY)
+    localStorage.removeItem(SUPABASE_AUTH_ADDRESS_KEY)
+    supabase?.realtime.setAuth()
+    logout()
+  }, [logout])
+
   const ensureSupabaseAuth = useCallback(async () => {
     if (!address || !SUPABASE_URL) return
     const addressLower = address.toLowerCase()
@@ -1000,15 +1008,20 @@ function App() {
   const activePeerValid = activePeer ? isAddress(activePeer) : false
 
   useEffect(() => {
-    if (!connected) {
+    if (connected) void ensureSupabaseAuth()
+  }, [connected, ensureSupabaseAuth])
+
+  useEffect(() => {
+    if (!address) return
+    const addressLower = address.toLowerCase()
+    const storedAddress = localStorage.getItem(SUPABASE_AUTH_ADDRESS_KEY)
+    if (storedAddress && storedAddress !== addressLower) {
       localStorage.removeItem(SUPABASE_AUTH_TOKEN_KEY)
       localStorage.removeItem(SUPABASE_AUTH_EXP_KEY)
       localStorage.removeItem(SUPABASE_AUTH_ADDRESS_KEY)
       supabase?.realtime.setAuth()
-      return
     }
-    void ensureSupabaseAuth()
-  }, [connected, ensureSupabaseAuth])
+  }, [address])
   const [lang, setLang] = useState<string>(() => {
     const saved = localStorage.getItem('lang')
     return saved || 'en'
@@ -3342,7 +3355,7 @@ function App() {
               </svg>
             </button>
             {connected ? (
-              <button className="btn btn--ghost" onClick={logout}>
+              <button className="btn btn--ghost" onClick={handleLogout}>
                 {t.signOut}
               </button>
             ) : (
