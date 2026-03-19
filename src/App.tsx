@@ -724,6 +724,7 @@ function App() {
   const [secretVisibilityUpdatedAt, setSecretVisibilityUpdatedAt] = useState<Record<string, string>>({})
   const [secretInfoOpen, setSecretInfoOpen] = useState(false)
   const supabaseAuthInFlightRef = useRef(false)
+  const [supabaseAuthed, setSupabaseAuthed] = useState(false)
 
   const syncLog = useCallback(
     (event: string, data?: Record<string, unknown>) => {
@@ -740,11 +741,15 @@ function App() {
     localStorage.removeItem(SUPABASE_AUTH_EXP_KEY)
     localStorage.removeItem(SUPABASE_AUTH_ADDRESS_KEY)
     supabase?.realtime.setAuth()
+    setSupabaseAuthed(false)
     logout()
   }, [logout])
 
   const ensureSupabaseAuth = useCallback(async () => {
-    if (!address || !SUPABASE_URL) return
+    if (!address || !SUPABASE_URL) {
+      setSupabaseAuthed(false)
+      return
+    }
     const addressLower = address.toLowerCase()
     const storedToken = localStorage.getItem(SUPABASE_AUTH_TOKEN_KEY)
     const storedExp = Number(localStorage.getItem(SUPABASE_AUTH_EXP_KEY) ?? '0')
@@ -755,6 +760,7 @@ function App() {
       storedExp > Date.now() / 1000 + 60
     ) {
       supabase?.realtime.setAuth(storedToken)
+      setSupabaseAuthed(true)
       return
     }
     if (supabaseAuthInFlightRef.current) return
@@ -778,8 +784,10 @@ function App() {
       }
       localStorage.setItem(SUPABASE_AUTH_ADDRESS_KEY, addressLower)
       supabase?.realtime.setAuth(data.access_token)
+      setSupabaseAuthed(true)
     } catch (err) {
       setError(getErrorMessage(err))
+      setSupabaseAuthed(false)
     } finally {
       supabaseAuthInFlightRef.current = false
     }
@@ -806,7 +814,7 @@ function App() {
 
   const loadSecretChats = useCallback(
     async (addressLower: string) => {
-      if (!supabase) return
+      if (!supabase || !supabaseAuthed) return
       try {
         const { data, error } = await supabase
           .from('secret_chats')
@@ -832,13 +840,13 @@ function App() {
         return
       }
     },
-    [],
+    [supabaseAuthed],
   )
 
 
   const handleCreateSecretChat = useCallback(
     async (peerLower: string) => {
-      if (!supabase || !address) return
+      if (!supabase || !supabaseAuthed || !address) return
       const addressLower = address.toLowerCase()
       const [addressA, addressB] = [addressLower, peerLower].sort()
       const createdAt = new Date().toISOString()
@@ -887,7 +895,7 @@ function App() {
         syncLog('secret_chat_create_error', { error: getErrorMessage(err) })
       }
     },
-    [address, emitSecretVisibility, syncLog],
+    [address, emitSecretVisibility, syncLog, supabaseAuthed],
   )
 
   const handleRemoveSecretChat = useCallback(
@@ -1012,6 +1020,12 @@ function App() {
   }, [connected, ensureSupabaseAuth])
 
   useEffect(() => {
+    if (!connected) {
+      setSupabaseAuthed(false)
+    }
+  }, [connected])
+
+  useEffect(() => {
     if (!address) return
     const addressLower = address.toLowerCase()
     const storedAddress = localStorage.getItem(SUPABASE_AUTH_ADDRESS_KEY)
@@ -1020,6 +1034,7 @@ function App() {
       localStorage.removeItem(SUPABASE_AUTH_EXP_KEY)
       localStorage.removeItem(SUPABASE_AUTH_ADDRESS_KEY)
       supabase?.realtime.setAuth()
+      setSupabaseAuthed(false)
     }
   }, [address])
   const [lang, setLang] = useState<string>(() => {
@@ -1196,7 +1211,7 @@ function App() {
   const loadProfiles = useCallback(
     async (addresses: string[]) => {
       const supabaseClient = supabase
-      if (!supabaseClient || addresses.length === 0) return
+      if (!supabaseClient || !supabaseAuthed || addresses.length === 0) return
       const now = Date.now()
       const cachedNameUpdates: Record<string, string | null> = {}
       const cachedAvatarUpdates: Record<string, string | null> = {}
@@ -1261,7 +1276,7 @@ function App() {
         setCustomAvatars((prev) => ({ ...prev, ...avatarUpdates }))
       }
     },
-    [setCustomNames, setCustomAvatars],
+    [setCustomNames, setCustomAvatars, supabaseAuthed],
   )
 
   const saveProfile = useCallback(
@@ -1272,7 +1287,7 @@ function App() {
       updated_at: string
     }) => {
       const supabaseClient = supabase
-      if (!supabaseClient) {
+      if (!supabaseClient || !supabaseAuthed) {
         throw new Error('Supabase is not configured')
       }
       const withTimeout = async <T,>(promise: Promise<T>, ms: number) => {
@@ -1316,7 +1331,7 @@ function App() {
         throw err
       }
     },
-    [],
+    [supabaseAuthed],
   )
 
   useEffect(() => {
@@ -1705,7 +1720,7 @@ function App() {
 
   const loadSecretVisibility = useCallback(
     async (addressLower: string) => {
-      if (!supabase) return
+      if (!supabase || !supabaseAuthed) return
       try {
         const { data, error } = await supabase
           .from('secret_visibility')
@@ -1731,11 +1746,11 @@ function App() {
         return
       }
     },
-    [applySecretVisibility],
+    [applySecretVisibility, supabaseAuthed],
   )
 
   useEffect(() => {
-    if (!supabase || !address) {
+    if (!supabase || !supabaseAuthed || !address) {
       setSecretPeers({})
       return
     }
@@ -1893,7 +1908,7 @@ function App() {
         secretChatsChannelRef.current = null
       }
     }
-  }, [address, loadSecretChats, loadSecretVisibility, applySecretVisibility])
+  }, [address, loadSecretChats, loadSecretVisibility, applySecretVisibility, supabaseAuthed])
 
   const ingestMessages = useCallback(
     async (rows: SupabaseMessage[], source?: string) => {
@@ -2047,7 +2062,7 @@ function App() {
   )
 
   const loadOlderMessages = useCallback(async () => {
-    if (!supabase || !address || !activePeerValid) return
+    if (!supabase || !supabaseAuthed || !address || !activePeerValid) return
     const peerLower = activePeer.toLowerCase()
     if (olderMessagesLoadingRef.current[peerLower]) return
     if (olderMessagesExhaustedRef.current[peerLower]) return
@@ -2096,7 +2111,7 @@ function App() {
         [peerLower]: false,
       }
     }
-  }, [address, activePeer, activePeerValid, ingestMessages])
+  }, [address, activePeer, activePeerValid, ingestMessages, supabaseAuthed])
 
   const handleChatScroll = () => {
     const el = chatBodyRef.current
@@ -2111,7 +2126,7 @@ function App() {
 
   const fetchMessageUpdates = useCallback(
     async (options: { since?: string; txHash?: string }) => {
-      if (!supabase || !address) return
+      if (!supabase || !supabaseAuthed || !address) return
       syncLog('message_fetch', {
         since: options.since,
         txHash: options.txHash,
@@ -2134,12 +2149,12 @@ function App() {
         await ingestMessages(data as SupabaseMessage[], 'message_fetch')
       }
     },
-    [address, ingestMessages, syncLog],
+    [address, ingestMessages, syncLog, supabaseAuthed],
   )
 
   useEffect(() => {
     const supabaseClient = supabase
-    if (!supabaseClient) return
+    if (!supabaseClient || !supabaseAuthed) return
     if (!address) return
     let cancelled = false
     const addressLower = address.toLowerCase()
@@ -2206,11 +2221,11 @@ function App() {
       window.removeEventListener('focus', pollMessages)
       document.removeEventListener('visibilitychange', handleVisibility)
     }
-  }, [address, ingestMessages, syncLog])
+  }, [address, ingestMessages, syncLog, supabaseAuthed])
 
   useEffect(() => {
     const supabaseClient = supabase
-    if (!supabaseClient || !address || !activePeerValid) return
+    if (!supabaseClient || !supabaseAuthed || !address || !activePeerValid) return
     let cancelled = false
     const addressLower = address.toLowerCase()
     const peerLower = activePeer.toLowerCase()
@@ -2320,7 +2335,7 @@ function App() {
       window.removeEventListener('focus', pollActiveMessages)
       document.removeEventListener('visibilitychange', handleVisibility)
     }
-  }, [address, activePeer, activePeerValid, ingestMessages, syncLog])
+  }, [address, activePeer, activePeerValid, ingestMessages, syncLog, supabaseAuthed])
 
   useEffect(() => {
     if (!address || !publicClient) return
@@ -2473,7 +2488,7 @@ function App() {
 
   useEffect(() => {
     const supabaseClient = supabase
-    if (!supabaseClient || !address) return
+    if (!supabaseClient || !supabaseAuthed || !address) return
     const addressLower = address.toLowerCase()
     const channel = supabaseClient.channel('chat:signals')
     signalsChannelRef.current = channel
@@ -2721,7 +2736,7 @@ function App() {
       channel.unsubscribe()
       signalsChannelRef.current = null
     }
-  }, [address, applyPeerVisibility, applySecretVisibility, fetchMessageUpdates, syncLog])
+  }, [address, applyPeerVisibility, applySecretVisibility, fetchMessageUpdates, syncLog, supabaseAuthed])
 
   useEffect(() => {
     const interval = setInterval(() => {
