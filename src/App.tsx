@@ -752,13 +752,16 @@ function App() {
     }
     const addressLower = address.toLowerCase()
     const storedToken = localStorage.getItem(SUPABASE_AUTH_TOKEN_KEY)
-    const storedExp = Number(localStorage.getItem(SUPABASE_AUTH_EXP_KEY) ?? '0')
+    const storedExpRaw = localStorage.getItem(SUPABASE_AUTH_EXP_KEY)
+    const storedExp = Number(storedExpRaw ?? '0')
     const storedAddress = localStorage.getItem(SUPABASE_AUTH_ADDRESS_KEY) ?? ''
-    if (
+    const hasValidExp =
+      Number.isFinite(storedExp) && storedExp > Date.now() / 1000 + 60
+    const canReuseToken =
       storedToken &&
       storedAddress === addressLower &&
-      storedExp > Date.now() / 1000 + 60
-    ) {
+      (!storedExpRaw || hasValidExp)
+    if (canReuseToken) {
       supabase?.realtime.setAuth(storedToken)
       setSupabaseAuthed(true)
       return
