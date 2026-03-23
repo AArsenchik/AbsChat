@@ -5,6 +5,7 @@
 1. Create a new Supabase project.
 2. Run the SQL below in the SQL editor.
 3. Copy `.env.example` to `.env` and fill in your project values.
+4. Set backend environment variables in your hosting provider.
 
 SQL schema:
 
@@ -25,12 +26,6 @@ create index if not exists messages_chain_idx on public.messages (chain_id);
 
 alter table public.messages enable row level security;
 
-create policy "public read" on public.messages
-for select using (true);
-
-create policy "public insert" on public.messages
-for insert with check (true);
-
 create table if not exists public.profiles (
   address text primary key not null,
   display_name text,
@@ -39,16 +34,13 @@ create table if not exists public.profiles (
 );
 
 alter table public.profiles enable row level security;
-
-create policy "public read profiles" on public.profiles
-for select using (true);
-
-create policy "public insert profiles" on public.profiles
-for insert with check (true);
-
-create policy "public update profiles" on public.profiles
-for update using (true);
 ```
+
+Backend env:
+
+- SUPABASE_URL
+- SUPABASE_SERVICE_ROLE_KEY
+- JWT_SECRET
 
 # React + TypeScript + Vite
 

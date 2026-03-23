@@ -5,7 +5,6 @@ import { fromHex, isAddress, toHex, parseEther, type Address } from 'viem'
 import { abstract } from 'viem/chains'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import { LimitType, type SessionConfig } from '@abstract-foundation/agw-client/sessions'
-import { supabase } from './lib/supabase'
 import './App.css'
 
 type MessageStatus = 'pending' | 'sent' | 'failed'
@@ -343,7 +342,6 @@ const MessageList = memo(function MessageList({
 const profileNameCache = new Map<string, { value: string | null; ts: number }>()
 const PROFILE_CACHE_TTL = 5 * 60 * 1000
 const SUPABASE_PROFILE_CACHE_TTL = 5 * 60 * 1000
-const MESSAGE_FIELDS = 'id, tx_hash, from_address, to_address, text, created_at, chain_id'
 const HISTORY_PAGE_SIZE = 200
 const ACTIVE_CHAT_PAGE_SIZE = 120
 const ACTIVE_CHAT_POLL_MS = 10000
@@ -399,10 +397,10 @@ const GIF_FILES = ['ppp1.mp4', 'ppp2.mp4', 'ppp3.mp4'] as const
 const MAX_AVATAR_BYTES = 512 * 1024
 const AVATAR_MAX_SIDE = 256
 const AVATAR_QUALITY = 0.85
-const SUPABASE_AUTH_TOKEN_KEY = 'supabaseAccessToken'
-const SUPABASE_AUTH_EXP_KEY = 'supabaseAccessTokenExp'
-const SUPABASE_AUTH_ADDRESS_KEY = 'supabaseAccessTokenAddress'
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string | undefined
+const BACKEND_AUTH_TOKEN_KEY = 'abschatAuthToken'
+const BACKEND_AUTH_EXP_KEY = 'abschatAuthExp'
+const BACKEND_AUTH_ADDRESS_KEY = 'abschatAuthAddress'
+const API_BASE = '/api'
 
 const toBase64 = (bytes: Uint8Array) =>
   btoa(String.fromCharCode(...Array.from(bytes)))
@@ -679,21 +677,17 @@ function App() {
   const activeSecretRef = useRef<boolean>(false)
   const [lastReadByPeer, setLastReadByPeer] = useState<Record<string, string>>({})
   const [readReceiptsByPeer, setReadReceiptsByPeer] = useState<Record<string, string>>({})
-  const [typingPeers, setTypingPeers] = useState<Record<string, boolean>>({})
-  const [onlinePeers, setOnlinePeers] = useState<Record<string, number>>({})
+  const [typingPeers] = useState<Record<string, boolean>>({})
+  const [onlinePeers] = useState<Record<string, number>>({})
   const [onlineTick, setOnlineTick] = useState<number>(() => Date.now())
-  const typingTimeoutsRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const typingSendTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const lastTypingSentRef = useRef<number>(0)
   const pollMessagesInFlightRef = useRef(false)
   const pollActiveMessagesInFlightRef = useRef(false)
   const pollIncomingInFlightRef = useRef(false)
   const profileCacheRef = useRef<
     Record<string, { displayName: string | null; avatarUrl: string | null; ts: number }>
   >({})
-  const signalsChannelRef = useRef<
-    ReturnType<NonNullable<typeof supabase>['channel']> | null
-  >(null)
+  const signalsChannelRef = useRef<null>(null)
   const deviceIdRef = useRef<string>(
     typeof crypto !== 'undefined' && 'randomUUID' in crypto
       ? crypto.randomUUID()
@@ -709,9 +703,6 @@ function App() {
   const newestMessageByPeerRef = useRef<Record<string, string>>({})
   const olderMessagesLoadingRef = useRef<Record<string, boolean>>({})
   const olderMessagesExhaustedRef = useRef<Record<string, boolean>>({})
-  const secretChatsChannelRef = useRef<
-    ReturnType<NonNullable<typeof supabase>['channel']> | null
-  >(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [profileOpen, setProfileOpen] = useState(false)
   const [profileEditing, setProfileEditing] = useState(false)
@@ -723,8 +714,8 @@ function App() {
   const [hiddenSecretPeers, setHiddenSecretPeers] = useState<string[]>([])
   const [secretVisibilityUpdatedAt, setSecretVisibilityUpdatedAt] = useState<Record<string, string>>({})
   const [secretInfoOpen, setSecretInfoOpen] = useState(false)
-  const supabaseAuthInFlightRef = useRef(false)
-  const [supabaseAuthed, setSupabaseAuthed] = useState(false)
+  const backendAuthInFlightRef = useRef(false)
+  const [backendAuthed, setBackendAuthed] = useState(false)
 
   const syncLog = useCallback(
     (event: string, data?: Record<string, unknown>) => {
@@ -737,24 +728,23 @@ function App() {
   )
 
   const handleLogout = useCallback(() => {
-    localStorage.removeItem(SUPABASE_AUTH_TOKEN_KEY)
-    localStorage.removeItem(SUPABASE_AUTH_EXP_KEY)
-    localStorage.removeItem(SUPABASE_AUTH_ADDRESS_KEY)
-    supabase?.realtime.setAuth()
-    setSupabaseAuthed(false)
+    localStorage.removeItem(BACKEND_AUTH_TOKEN_KEY)
+    localStorage.removeItem(BACKEND_AUTH_EXP_KEY)
+    localStorage.removeItem(BACKEND_AUTH_ADDRESS_KEY)
+    setBackendAuthed(false)
     logout()
   }, [logout])
 
-  const ensureSupabaseAuth = useCallback(async () => {
-    if (!address || !SUPABASE_URL) {
-      setSupabaseAuthed(false)
+  const ensureBackendAuth = useCallback(async () => {
+    if (!address) {
+      setBackendAuthed(false)
       return
     }
     const addressLower = address.toLowerCase()
-    const storedToken = localStorage.getItem(SUPABASE_AUTH_TOKEN_KEY)
-    const storedExpRaw = localStorage.getItem(SUPABASE_AUTH_EXP_KEY)
+    const storedToken = localStorage.getItem(BACKEND_AUTH_TOKEN_KEY)
+    const storedExpRaw = localStorage.getItem(BACKEND_AUTH_EXP_KEY)
     const storedExp = Number(storedExpRaw ?? '0')
-    const storedAddress = localStorage.getItem(SUPABASE_AUTH_ADDRESS_KEY) ?? ''
+    const storedAddress = localStorage.getItem(BACKEND_AUTH_ADDRESS_KEY) ?? ''
     const hasValidExp =
       Number.isFinite(storedExp) && storedExp > Date.now() / 1000 + 60
     const canReuseToken =
@@ -762,17 +752,16 @@ function App() {
       storedAddress === addressLower &&
       (!storedExpRaw || hasValidExp)
     if (canReuseToken) {
-      supabase?.realtime.setAuth(storedToken)
-      setSupabaseAuthed(true)
+      setBackendAuthed(true)
       return
     }
-    if (supabaseAuthInFlightRef.current) return
-    supabaseAuthInFlightRef.current = true
+    if (backendAuthInFlightRef.current) return
+    backendAuthInFlightRef.current = true
     try {
       const nonce = crypto.randomUUID()
       const message = `AbsChat login\nAddress: ${addressLower}\nNonce: ${nonce}`
       const signature = await signMessageAsync({ message })
-      const response = await fetch(`${SUPABASE_URL}/functions/v1/wallet-auth`, {
+      const response = await fetch(`${API_BASE}/auth`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ address: addressLower, message, signature }),
@@ -781,57 +770,71 @@ function App() {
       if (!response.ok || !data?.access_token) {
         throw new Error(data?.error ?? 'Auth failed')
       }
-      localStorage.setItem(SUPABASE_AUTH_TOKEN_KEY, data.access_token)
+      localStorage.setItem(BACKEND_AUTH_TOKEN_KEY, data.access_token)
       if (data.expires_at) {
-        localStorage.setItem(SUPABASE_AUTH_EXP_KEY, String(data.expires_at))
+        localStorage.setItem(BACKEND_AUTH_EXP_KEY, String(data.expires_at))
       }
-      localStorage.setItem(SUPABASE_AUTH_ADDRESS_KEY, addressLower)
-      supabase?.realtime.setAuth(data.access_token)
-      setSupabaseAuthed(true)
+      localStorage.setItem(BACKEND_AUTH_ADDRESS_KEY, addressLower)
+      setBackendAuthed(true)
     } catch (err) {
       setError(getErrorMessage(err))
-      setSupabaseAuthed(false)
+      setBackendAuthed(false)
     } finally {
-      supabaseAuthInFlightRef.current = false
+      backendAuthInFlightRef.current = false
     }
   }, [address, signMessageAsync])
 
   const emitSecretVisibility = useCallback(
-    (peer: string, hidden: boolean, updatedAt: string) => {
-      if (!signalsChannelRef.current || !address) return
-      const addressLower = address.toLowerCase()
-      signalsChannelRef.current.send({
-        type: 'broadcast',
-        event: 'secret_visibility',
-        payload: {
-          from: addressLower,
-          to: addressLower,
-          peer,
-          hidden,
-          updatedAt,
-        },
-      })
+    (_peer: string, _hidden: boolean, _updatedAt: string) => {
+      if (!address) return
+      void _peer
+      void _hidden
+      void _updatedAt
     },
     [address],
   )
 
+  const getBackendToken = useCallback(() => {
+    if (typeof localStorage === 'undefined') return null
+    const token = localStorage.getItem(BACKEND_AUTH_TOKEN_KEY)
+    if (!token) return null
+    const expValue = localStorage.getItem(BACKEND_AUTH_EXP_KEY)
+    if (!expValue) return token
+    const exp = Number(expValue)
+    if (!Number.isFinite(exp)) return token
+    if (Date.now() / 1000 > exp - 60) return null
+    return token
+  }, [])
+
+  const apiFetch = useCallback(async (path: string, options?: RequestInit) => {
+    const token = getBackendToken()
+    if (!token) {
+      throw new Error('Auth required')
+    }
+    const headers = new Headers(options?.headers)
+    headers.set('Authorization', `Bearer ${token}`)
+    if (!headers.has('Content-Type') && options?.body) {
+      headers.set('Content-Type', 'application/json')
+    }
+    const response = await fetch(`${API_BASE}${path}`, {
+      ...options,
+      headers,
+    })
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}))
+      throw new Error(body?.error ?? 'Request failed')
+    }
+    return response.json()
+  }, [getBackendToken])
+
   const loadSecretChats = useCallback(
     async (addressLower: string) => {
-      if (!supabase || !supabaseAuthed) return
+      if (!backendAuthed) return
       try {
-        const { data, error } = await supabase
-          .from('secret_chats')
-          .select('address_a, address_b, created_at, chain_id')
-          .eq('chain_id', abstract.id)
-          .or(`address_a.eq.${addressLower},address_b.eq.${addressLower}`)
-        if (error || !data) return
+        const response = await apiFetch(`/secret-chats?chainId=${abstract.id}`)
+        const data = Array.isArray(response?.data) ? response.data : []
         const next: Record<string, string> = {}
-        data.forEach((row) => {
-          const item = row as {
-            address_a: string
-            address_b: string
-            created_at: string
-          }
+        data.forEach((item: { address_a: string; address_b: string; created_at: string }) => {
           const peerLower =
             item.address_a.toLowerCase() === addressLower
               ? item.address_b.toLowerCase()
@@ -843,49 +846,38 @@ function App() {
         return
       }
     },
-    [supabaseAuthed],
+    [apiFetch, backendAuthed],
   )
 
 
   const handleCreateSecretChat = useCallback(
     async (peerLower: string) => {
-      if (!supabase || !supabaseAuthed || !address) return
+      if (!backendAuthed || !address) return
       const addressLower = address.toLowerCase()
-      const [addressA, addressB] = [addressLower, peerLower].sort()
       const createdAt = new Date().toISOString()
       try {
         try {
-          await supabase
-            .from('secret_visibility')
-            .upsert(
-              [
-                {
-                  owner_address: addressLower,
-                  peer_address: peerLower,
-                  chain_id: abstract.id,
-                  hidden: false,
-                  updated_at: createdAt,
-                },
-              ],
-              { onConflict: 'owner_address,peer_address,chain_id' },
-            )
+          await apiFetch('/secret-visibility', {
+            method: 'POST',
+            body: JSON.stringify({
+              owner_address: addressLower,
+              peer_address: peerLower,
+              chain_id: abstract.id,
+              hidden: false,
+              updated_at: createdAt,
+            }),
+          })
         } catch (err) {
           syncLog('secret_visibility_create_error', { error: getErrorMessage(err) })
         }
-        await supabase
-          .from('secret_chats')
-          .upsert(
-            [
-              {
-                address_a: addressA,
-                address_b: addressB,
-                chain_id: abstract.id,
-                created_at: createdAt,
-                created_by: addressLower,
-              },
-            ],
-            { onConflict: 'address_a,address_b,chain_id' },
-          )
+        await apiFetch('/secret-chats', {
+          method: 'POST',
+          body: JSON.stringify({
+            peer: peerLower,
+            chain_id: abstract.id,
+            created_at: createdAt,
+          }),
+        })
         setHiddenSecretPeers((prev) => prev.filter((peer) => peer !== peerLower))
         setSecretVisibilityUpdatedAt((prev) => ({
           ...prev,
@@ -898,7 +890,7 @@ function App() {
         syncLog('secret_chat_create_error', { error: getErrorMessage(err) })
       }
     },
-    [address, emitSecretVisibility, syncLog, supabaseAuthed],
+    [address, emitSecretVisibility, syncLog, backendAuthed, apiFetch],
   )
 
   const handleRemoveSecretChat = useCallback(
@@ -916,31 +908,25 @@ function App() {
       if (activeSecret && activePeer.toLowerCase() === peerLower) {
         setActiveSecret(false)
       }
-      if (supabase) {
-        const addressLower = address.toLowerCase()
-        try {
-          await supabase
-            .from('secret_visibility')
-            .upsert(
-              [
-                {
-                  owner_address: addressLower,
-                  peer_address: peerLower,
-                  chain_id: abstract.id,
-                  hidden: true,
-                  updated_at: updatedAt,
-                },
-              ],
-              { onConflict: 'owner_address,peer_address,chain_id' },
-            )
-        } catch (err) {
-          syncLog('secret_visibility_remove_error', { error: getErrorMessage(err) })
-        }
+      const addressLower = address.toLowerCase()
+      try {
+        await apiFetch('/secret-visibility', {
+          method: 'POST',
+          body: JSON.stringify({
+            owner_address: addressLower,
+            peer_address: peerLower,
+            chain_id: abstract.id,
+            hidden: true,
+            updated_at: updatedAt,
+          }),
+        })
+      } catch (err) {
+        syncLog('secret_visibility_remove_error', { error: getErrorMessage(err) })
       }
       emitSecretVisibility(peerLower, true, updatedAt)
       syncLog('secret_chat_remove', { peer: peerLower })
     },
-    [address, activePeer, activeSecret, emitSecretVisibility, syncLog],
+    [address, activePeer, activeSecret, emitSecretVisibility, syncLog, apiFetch],
   )
 
   useEffect(() => {
@@ -1019,25 +1005,24 @@ function App() {
   const activePeerValid = activePeer ? isAddress(activePeer) : false
 
   useEffect(() => {
-    if (connected) void ensureSupabaseAuth()
-  }, [connected, ensureSupabaseAuth])
+    if (connected) void ensureBackendAuth()
+  }, [connected, ensureBackendAuth])
 
   useEffect(() => {
     if (!connected) {
-      setSupabaseAuthed(false)
+      setBackendAuthed(false)
     }
   }, [connected])
 
   useEffect(() => {
     if (!address) return
     const addressLower = address.toLowerCase()
-    const storedAddress = localStorage.getItem(SUPABASE_AUTH_ADDRESS_KEY)
+    const storedAddress = localStorage.getItem(BACKEND_AUTH_ADDRESS_KEY)
     if (storedAddress && storedAddress !== addressLower) {
-      localStorage.removeItem(SUPABASE_AUTH_TOKEN_KEY)
-      localStorage.removeItem(SUPABASE_AUTH_EXP_KEY)
-      localStorage.removeItem(SUPABASE_AUTH_ADDRESS_KEY)
-      supabase?.realtime.setAuth()
-      setSupabaseAuthed(false)
+      localStorage.removeItem(BACKEND_AUTH_TOKEN_KEY)
+      localStorage.removeItem(BACKEND_AUTH_EXP_KEY)
+      localStorage.removeItem(BACKEND_AUTH_ADDRESS_KEY)
+      setBackendAuthed(false)
     }
   }, [address])
   const [lang, setLang] = useState<string>(() => {
@@ -1213,8 +1198,7 @@ function App() {
 
   const loadProfiles = useCallback(
     async (addresses: string[]) => {
-      const supabaseClient = supabase
-      if (!supabaseClient || !supabaseAuthed || addresses.length === 0) return
+      if (!backendAuthed || addresses.length === 0) return
       const now = Date.now()
       const cachedNameUpdates: Record<string, string | null> = {}
       const cachedAvatarUpdates: Record<string, string | null> = {}
@@ -1239,20 +1223,20 @@ function App() {
         setCustomAvatars((prev) => ({ ...prev, ...cachedAvatarUpdates }))
       }
       if (toFetch.length === 0) return
-      const { data, error } = await supabaseClient
-        .from('profiles')
-        .select('address, display_name, avatar_url')
-        .in('address', toFetch)
-      if (error) {
-        console.error('Profile load error:', error)
+      let data: SupabaseProfile[] = []
+      try {
+        const response = await apiFetch(
+          `/profiles?addresses=${encodeURIComponent(toFetch.join(','))}`,
+        )
+        data = Array.isArray(response?.data) ? response.data : []
+      } catch (err) {
+        console.error('Profile load error:', err)
         return
       }
-      if (!data) return
       const nameUpdates: Record<string, string | null> = {}
       const avatarUpdates: Record<string, string | null> = {}
       const received = new Set<string>()
-      data.forEach((row) => {
-        const item = row as SupabaseProfile
+      data.forEach((item: SupabaseProfile) => {
         if (!item?.address) return
         const key = item.address.toLowerCase()
         received.add(key)
@@ -1279,7 +1263,7 @@ function App() {
         setCustomAvatars((prev) => ({ ...prev, ...avatarUpdates }))
       }
     },
-    [setCustomNames, setCustomAvatars, supabaseAuthed],
+    [setCustomNames, setCustomAvatars, backendAuthed, apiFetch],
   )
 
   const saveProfile = useCallback(
@@ -1289,10 +1273,6 @@ function App() {
       avatar_url: string | null
       updated_at: string
     }) => {
-      const supabaseClient = supabase
-      if (!supabaseClient || !supabaseAuthed) {
-        throw new Error('Supabase is not configured')
-      }
       const withTimeout = async <T,>(promise: Promise<T>, ms: number) => {
         let timeoutId: ReturnType<typeof setTimeout> | null = null
         const timeout = new Promise<never>((_, reject) => {
@@ -1309,19 +1289,14 @@ function App() {
         }
       }
       const attempt = async () => {
-        const request = supabaseClient
-          .from('profiles')
-          .upsert([payload], { onConflict: 'address' })
-          .select('address, display_name, avatar_url')
-        const response = await withTimeout(Promise.resolve(request), 12000)
-        const { data, error } = response as {
-          data: SupabaseProfile[] | null
-          error: unknown
-        }
-        if (error) {
-          throw error
-        }
-        const row = Array.isArray(data) ? (data[0] as SupabaseProfile) : null
+        const response = await withTimeout(
+          apiFetch('/profiles', {
+            method: 'POST',
+            body: JSON.stringify(payload),
+          }),
+          12000,
+        )
+        const row = response?.data as SupabaseProfile | null
         return row ?? null
       }
       try {
@@ -1334,7 +1309,7 @@ function App() {
         throw err
       }
     },
-    [supabaseAuthed],
+    [apiFetch],
   )
 
   useEffect(() => {
@@ -1722,21 +1697,12 @@ function App() {
   )
 
   const loadSecretVisibility = useCallback(
-    async (addressLower: string) => {
-      if (!supabase || !supabaseAuthed) return
+    async () => {
+      if (!backendAuthed) return
       try {
-        const { data, error } = await supabase
-          .from('secret_visibility')
-          .select('peer_address, hidden, updated_at, chain_id, owner_address')
-          .eq('chain_id', abstract.id)
-          .eq('owner_address', addressLower)
-        if (error || !data) return
-        data.forEach((row) => {
-          const item = row as {
-            peer_address: string
-            hidden: boolean
-            updated_at: string
-          }
+        const response = await apiFetch(`/secret-visibility?chainId=${abstract.id}`)
+        const data = Array.isArray(response?.data) ? response.data : []
+        data.forEach((item: { peer_address: string; hidden: boolean; updated_at: string }) => {
           if (!item.peer_address || !item.updated_at) return
           applySecretVisibility(
             item.peer_address,
@@ -1749,169 +1715,18 @@ function App() {
         return
       }
     },
-    [applySecretVisibility, supabaseAuthed],
+    [applySecretVisibility, backendAuthed, apiFetch],
   )
 
   useEffect(() => {
-    if (!supabase || !supabaseAuthed || !address) {
+    if (!backendAuthed || !address) {
       setSecretPeers({})
       return
     }
-    const supabaseClient = supabase
     const addressLower = address.toLowerCase()
-    loadSecretVisibility(addressLower)
+    loadSecretVisibility()
     loadSecretChats(addressLower)
-    const channel = supabaseClient.channel(`chat:secrets:${addressLower}`)
-    const handleRow = (row: {
-      address_a: string
-      address_b: string
-      created_at: string
-    }) => {
-      const peerLower =
-        row.address_a.toLowerCase() === addressLower
-          ? row.address_b.toLowerCase()
-          : row.address_a.toLowerCase()
-      const current = secretVisibilityUpdatedAtRef.current[peerLower] ?? '1970-01-01'
-      if (row.created_at > current) {
-        setHiddenSecretPeers((prev) => prev.filter((peer) => peer !== peerLower))
-        setSecretVisibilityUpdatedAt((prev) => ({
-          ...prev,
-          [peerLower]: row.created_at,
-        }))
-      }
-      setSecretPeers((prev) => ({ ...prev, [peerLower]: row.created_at }))
-    }
-    const handleRemove = (row: { address_a: string; address_b: string }) => {
-      const peerLower =
-        row.address_a.toLowerCase() === addressLower
-          ? row.address_b.toLowerCase()
-          : row.address_a.toLowerCase()
-      setSecretPeers((prev) => {
-        const next = { ...prev }
-        delete next[peerLower]
-        return next
-      })
-    }
-    const handleVisibilityRow = (row: {
-      peer_address: string
-      hidden: boolean
-      updated_at: string
-    }) => {
-      if (!row.peer_address || !row.updated_at) return
-      applySecretVisibility(row.peer_address, Boolean(row.hidden), row.updated_at, {
-        force: true,
-      })
-    }
-    channel
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'secret_chats',
-          filter: `chain_id=eq.${abstract.id},address_a=eq.${addressLower}`,
-        },
-        (payload) =>
-          handleRow(
-            payload.new as {
-              address_a: string
-              address_b: string
-              created_at: string
-            },
-          ),
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'secret_chats',
-          filter: `chain_id=eq.${abstract.id},address_b=eq.${addressLower}`,
-        },
-        (payload) =>
-          handleRow(
-            payload.new as {
-              address_a: string
-              address_b: string
-              created_at: string
-            },
-          ),
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'DELETE',
-          schema: 'public',
-          table: 'secret_chats',
-          filter: `chain_id=eq.${abstract.id},address_a=eq.${addressLower}`,
-        },
-        (payload) =>
-          handleRemove(
-            payload.old as {
-              address_a: string
-              address_b: string
-            },
-          ),
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'DELETE',
-          schema: 'public',
-          table: 'secret_chats',
-          filter: `chain_id=eq.${abstract.id},address_b=eq.${addressLower}`,
-        },
-        (payload) =>
-          handleRemove(
-            payload.old as {
-              address_a: string
-              address_b: string
-            },
-          ),
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'secret_visibility',
-          filter: `chain_id=eq.${abstract.id},owner_address=eq.${addressLower}`,
-        },
-        (payload) =>
-          handleVisibilityRow(
-            payload.new as {
-              peer_address: string
-              hidden: boolean
-              updated_at: string
-            },
-          ),
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'secret_visibility',
-          filter: `chain_id=eq.${abstract.id},owner_address=eq.${addressLower}`,
-        },
-        (payload) =>
-          handleVisibilityRow(
-            payload.new as {
-              peer_address: string
-              hidden: boolean
-              updated_at: string
-            },
-          ),
-      )
-      .subscribe()
-    secretChatsChannelRef.current = channel
-    return () => {
-      if (secretChatsChannelRef.current) {
-        supabaseClient.removeChannel(secretChatsChannelRef.current)
-        secretChatsChannelRef.current = null
-      }
-    }
-  }, [address, loadSecretChats, loadSecretVisibility, applySecretVisibility, supabaseAuthed])
+  }, [address, loadSecretChats, loadSecretVisibility, backendAuthed])
 
   const ingestMessages = useCallback(
     async (rows: SupabaseMessage[], source?: string) => {
@@ -1974,22 +1789,15 @@ function App() {
               }))
               emitSecretVisibility(peerLower, false, m.createdAt)
             }
-            if (supabase) {
-              const [addressA, addressB] = [addressLower, peerLower].sort()
-              void supabase
-                .from('secret_chats')
-                .upsert(
-                  [
-                    {
-                      address_a: addressA,
-                      address_b: addressB,
-                      chain_id: abstract.id,
-                      created_at: m.createdAt,
-                      created_by: addressLower,
-                    },
-                  ],
-                  { onConflict: 'address_a,address_b,chain_id' },
-                )
+            if (backendAuthed) {
+              void apiFetch('/secret-chats', {
+                method: 'POST',
+                body: JSON.stringify({
+                  peer: peerLower,
+                  chain_id: abstract.id,
+                  created_at: m.createdAt,
+                }),
+              }).catch(() => {})
             }
           }
           const currentKey = conversationKeyRef.current
@@ -2061,11 +1869,11 @@ function App() {
         applyPeerVisibility(sender, false, createdAt)
       })
     },
-    [address, applyPeerVisibility, emitSecretVisibility, syncLog],
+    [address, applyPeerVisibility, emitSecretVisibility, syncLog, apiFetch, backendAuthed],
   )
 
   const loadOlderMessages = useCallback(async () => {
-    if (!supabase || !supabaseAuthed || !address || !activePeerValid) return
+    if (!backendAuthed || !address || !activePeerValid) return
     const peerLower = activePeer.toLowerCase()
     if (olderMessagesLoadingRef.current[peerLower]) return
     if (olderMessagesExhaustedRef.current[peerLower]) return
@@ -2075,21 +1883,16 @@ function App() {
       ...olderMessagesLoadingRef.current,
       [peerLower]: true,
     }
-    const addressLower = address.toLowerCase()
     const el = chatBodyRef.current
     const prevHeight = el?.scrollHeight ?? 0
     try {
-      const { data, error } = await supabase
-        .from('messages')
-        .select(MESSAGE_FIELDS)
-        .eq('chain_id', abstract.id)
-        .or(
-          `and(from_address.eq.${addressLower},to_address.eq.${peerLower}),and(from_address.eq.${peerLower},to_address.eq.${addressLower})`,
-        )
-        .lt('created_at', oldest)
-        .order('created_at', { ascending: false })
-        .limit(ACTIVE_CHAT_PAGE_SIZE)
-      if (error || !data || data.length === 0) {
+      const response = await apiFetch(
+        `/messages?peer=${peerLower}&before=${encodeURIComponent(
+          oldest,
+        )}&chainId=${abstract.id}&limit=${ACTIVE_CHAT_PAGE_SIZE}&order=desc`,
+      )
+      const data = Array.isArray(response?.data) ? response.data : []
+      if (data.length === 0) {
         olderMessagesExhaustedRef.current = {
           ...olderMessagesExhaustedRef.current,
           [peerLower]: true,
@@ -2114,7 +1917,7 @@ function App() {
         [peerLower]: false,
       }
     }
-  }, [address, activePeer, activePeerValid, ingestMessages, supabaseAuthed])
+  }, [address, activePeer, activePeerValid, ingestMessages, backendAuthed, apiFetch])
 
   const handleChatScroll = () => {
     const el = chatBodyRef.current
@@ -2127,51 +1930,20 @@ function App() {
     shouldAutoScrollRef.current = distanceFromBottom < threshold
   }
 
-  const fetchMessageUpdates = useCallback(
-    async (options: { since?: string; txHash?: string }) => {
-      if (!supabase || !supabaseAuthed || !address) return
-      syncLog('message_fetch', {
-        since: options.since,
-        txHash: options.txHash,
-      })
-      const addressLower = address.toLowerCase()
-      let query = supabase
-        .from('messages')
-        .select(MESSAGE_FIELDS)
-        .eq('chain_id', abstract.id)
-        .or(`from_address.eq.${addressLower},to_address.eq.${addressLower}`)
-        .order('created_at', { ascending: true })
-        .limit(120)
-      if (options.txHash) {
-        query = query.eq('tx_hash', options.txHash)
-      } else if (options.since) {
-        query = query.gt('created_at', options.since)
-      }
-      const { data } = await query
-      if (data && data.length) {
-        await ingestMessages(data as SupabaseMessage[], 'message_fetch')
-      }
-    },
-    [address, ingestMessages, syncLog, supabaseAuthed],
-  )
-
   useEffect(() => {
-    const supabaseClient = supabase
-    if (!supabaseClient || !supabaseAuthed) return
+    if (!backendAuthed) return
     if (!address) return
     let cancelled = false
-    const addressLower = address.toLowerCase()
 
     const loadHistory = async () => {
       try {
-        const { data, error } = await supabaseClient
-          .from('messages')
-          .select(MESSAGE_FIELDS)
-          .eq('chain_id', abstract.id)
-          .or(`from_address.eq.${addressLower},to_address.eq.${addressLower}`)
-          .order('created_at', { ascending: false })
-          .limit(HISTORY_PAGE_SIZE)
-        if (error || !data) return
+        const params = new URLSearchParams()
+        params.set('chainId', String(abstract.id))
+        params.set('limit', String(HISTORY_PAGE_SIZE))
+        params.set('order', 'desc')
+        const response = await apiFetch(`/messages?${params.toString()}`)
+        const data = Array.isArray(response?.data) ? response.data : []
+        if (!data.length) return
         await ingestMessages(data as SupabaseMessage[], 'history')
         syncLog('history_loaded', { count: data.length })
       } catch (err) {
@@ -2179,25 +1951,20 @@ function App() {
       }
     }
 
-    // Polling for new messages (fallback for Realtime)
     const pollMessages = async () => {
       if (pollMessagesInFlightRef.current) return
       if (document.visibilityState === 'hidden') return
       pollMessagesInFlightRef.current = true
       try {
         const lastCreated = lastMessageTimestampRef.current
-
-        const { data } = await supabaseClient
-          .from('messages')
-          .select(MESSAGE_FIELDS)
-          .eq('chain_id', abstract.id)
-          .or(`from_address.eq.${addressLower},to_address.eq.${addressLower}`)
-          .gt('created_at', lastCreated)
-          .order('created_at', { ascending: true })
-          .limit(80)
-
-        if (!cancelled && data) {
-          await ingestMessages(data, 'poll')
+        const params = new URLSearchParams()
+        params.set('chainId', String(abstract.id))
+        params.set('since', lastCreated)
+        params.set('limit', '80')
+        const response = await apiFetch(`/messages?${params.toString()}`)
+        const data = Array.isArray(response?.data) ? response.data : []
+        if (!cancelled && data.length) {
+          await ingestMessages(data as SupabaseMessage[], 'poll')
         }
       } catch (err) {
         syncLog('poll_error', { error: getErrorMessage(err) })
@@ -2224,28 +1991,24 @@ function App() {
       window.removeEventListener('focus', pollMessages)
       document.removeEventListener('visibilitychange', handleVisibility)
     }
-  }, [address, ingestMessages, syncLog, supabaseAuthed])
+  }, [address, ingestMessages, syncLog, backendAuthed, apiFetch])
 
   useEffect(() => {
-    const supabaseClient = supabase
-    if (!supabaseClient || !supabaseAuthed || !address || !activePeerValid) return
+    if (!backendAuthed || !address || !activePeerValid) return
     let cancelled = false
-    const addressLower = address.toLowerCase()
     const peerLower = activePeer.toLowerCase()
 
     const ensureChatBootstrap = async () => {
       if (newestMessageByPeerRef.current[peerLower]) return
       try {
-        const { data, error } = await supabaseClient
-          .from('messages')
-          .select(MESSAGE_FIELDS)
-          .eq('chain_id', abstract.id)
-          .or(
-            `and(from_address.eq.${addressLower},to_address.eq.${peerLower}),and(from_address.eq.${peerLower},to_address.eq.${addressLower})`,
-          )
-          .order('created_at', { ascending: false })
-          .limit(ACTIVE_CHAT_PAGE_SIZE)
-        if (error || !data || cancelled) return
+        const params = new URLSearchParams()
+        params.set('chainId', String(abstract.id))
+        params.set('peer', peerLower)
+        params.set('limit', String(ACTIVE_CHAT_PAGE_SIZE))
+        params.set('order', 'desc')
+        const response = await apiFetch(`/messages?${params.toString()}`)
+        const data = Array.isArray(response?.data) ? response.data : []
+        if (!data.length || cancelled) return
         await ingestMessages(data as SupabaseMessage[], 'chat_bootstrap')
       } catch (err) {
         syncLog('chat_bootstrap_error', { error: getErrorMessage(err) })
@@ -2257,21 +2020,15 @@ function App() {
       if (document.visibilityState === 'hidden') return
       pollActiveMessagesInFlightRef.current = true
       try {
+        const params = new URLSearchParams()
+        params.set('chainId', String(abstract.id))
+        params.set('peer', peerLower)
+        params.set('limit', '80')
         const since = newestMessageByPeerRef.current[peerLower]
-        let query = supabaseClient
-          .from('messages')
-          .select(MESSAGE_FIELDS)
-          .eq('chain_id', abstract.id)
-          .or(
-            `and(from_address.eq.${addressLower},to_address.eq.${peerLower}),and(from_address.eq.${peerLower},to_address.eq.${addressLower})`,
-          )
-          .order('created_at', { ascending: true })
-          .limit(80)
-        if (since) {
-          query = query.gt('created_at', since)
-        }
-        const { data } = await query
-        if (!cancelled && data && data.length) {
+        if (since) params.set('since', since)
+        const response = await apiFetch(`/messages?${params.toString()}`)
+        const data = Array.isArray(response?.data) ? response.data : []
+        if (!cancelled && data.length) {
           await ingestMessages(data as SupabaseMessage[], 'chat_poll')
         }
       } catch (err) {
@@ -2280,44 +2037,6 @@ function App() {
         pollActiveMessagesInFlightRef.current = false
       }
     }
-
-    const channel = supabaseClient
-      .channel(`chat:messages:${addressLower}:${peerLower}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'messages',
-          filter: `chain_id=eq.${abstract.id},from_address=eq.${addressLower},to_address=eq.${peerLower}`,
-        },
-        async (payload) => {
-          const row = payload.new as SupabaseMessage
-          await ingestMessages([row], 'realtime_active')
-        },
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'messages',
-          filter: `chain_id=eq.${abstract.id},from_address=eq.${peerLower},to_address=eq.${addressLower}`,
-        },
-        async (payload) => {
-          const row = payload.new as SupabaseMessage
-          await ingestMessages([row], 'realtime_active')
-        },
-      )
-      .subscribe((status, err) => {
-        syncLog('chat_realtime_status', {
-          status,
-          error: err ? getErrorMessage(err) : undefined,
-        })
-        if (status === 'SUBSCRIBED') {
-          pollActiveMessages()
-        }
-      })
 
     ensureChatBootstrap()
     pollActiveMessages()
@@ -2333,12 +2052,11 @@ function App() {
     return () => {
       cancelled = true
       pollActiveMessagesInFlightRef.current = false
-      supabaseClient.removeChannel(channel)
       clearInterval(interval)
       window.removeEventListener('focus', pollActiveMessages)
       document.removeEventListener('visibilitychange', handleVisibility)
     }
-  }, [address, activePeer, activePeerValid, ingestMessages, syncLog, supabaseAuthed])
+  }, [address, activePeer, activePeerValid, ingestMessages, syncLog, backendAuthed, apiFetch])
 
   useEffect(() => {
     if (!address || !publicClient) return
@@ -2452,9 +2170,10 @@ function App() {
           }
           setMessages((prev) => mergeMessages(prev, discovered))
         }
-        if (supabase && upserts.length) {
-          await supabase.from('messages').upsert(upserts, {
-            onConflict: 'tx_hash',
+        if (backendAuthed && upserts.length) {
+          await apiFetch('/messages', {
+            method: 'POST',
+            body: JSON.stringify({ rows: upserts }),
           })
           syncLog('chain_upsert', { count: upserts.length })
         }
@@ -2487,259 +2206,11 @@ function App() {
       window.removeEventListener('focus', pollIncoming)
       document.removeEventListener('visibilitychange', handleVisibility)
     }
-  }, [address, publicClient, peers, activePeerValid, syncLog])
+  }, [address, publicClient, peers, activePeerValid, syncLog, apiFetch, backendAuthed])
 
   useEffect(() => {
-    const supabaseClient = supabase
-    if (!supabaseClient || !supabaseAuthed || !address) return
-    const addressLower = address.toLowerCase()
-    const channel = supabaseClient.channel('chat:signals')
-    signalsChannelRef.current = channel
-
-    channel
-      .on('broadcast', { event: 'presence' }, (payload) => {
-        const data = payload.payload as {
-          from?: string
-          to?: string
-          active?: boolean
-        }
-        if (!data?.from || !data?.to) return
-        if (data.to.toLowerCase() !== addressLower) return
-        const peerLower = data.from.toLowerCase()
-        setOnlinePeers((prev) => {
-          if (data.active === false) {
-            if (!prev[peerLower]) return prev
-            const next = { ...prev }
-            delete next[peerLower]
-            return next
-          }
-          return { ...prev, [peerLower]: Date.now() }
-        })
-      })
-      .on('broadcast', { event: 'typing' }, (payload) => {
-        const data = payload.payload as {
-          from?: string
-          to?: string
-          typing?: boolean
-        }
-        if (!data?.from || !data?.to) return
-        if (data.to.toLowerCase() !== addressLower) return
-        const peerLower = data.from.toLowerCase()
-        if (data.typing) {
-          setTypingPeers((prev) => ({ ...prev, [peerLower]: true }))
-          if (typingTimeoutsRef.current[peerLower]) {
-            clearTimeout(typingTimeoutsRef.current[peerLower])
-          }
-          typingTimeoutsRef.current[peerLower] = setTimeout(() => {
-            setTypingPeers((prev) => ({ ...prev, [peerLower]: false }))
-          }, 5500)
-        } else {
-          if (typingTimeoutsRef.current[peerLower]) {
-            clearTimeout(typingTimeoutsRef.current[peerLower])
-          }
-          setTypingPeers((prev) => ({ ...prev, [peerLower]: false }))
-        }
-      })
-      .on('broadcast', { event: 'read' }, (payload) => {
-        const data = payload.payload as {
-          from?: string
-          to?: string
-          readAt?: string
-        }
-        if (!data?.from || !data?.to || !data?.readAt) return
-        const readAt = data.readAt
-        if (data.to.toLowerCase() !== addressLower) return
-        const peerLower = data.from.toLowerCase()
-        setReadReceiptsByPeer((prev) => {
-          const current = prev[peerLower] ?? '1970-01-01'
-          if (readAt <= current) return prev
-          return { ...prev, [peerLower]: readAt }
-        })
-      })
-      .on('broadcast', { event: 'profile' }, (payload) => {
-        const data = payload.payload as {
-          from?: string
-          to?: string
-          displayName?: string | null
-          avatarUrl?: string | null
-        }
-        if (!data?.from || !data?.to) return
-        if (data.to.toLowerCase() !== addressLower) return
-        const key = data.from.toLowerCase()
-        if (data.displayName !== undefined) {
-          setCustomNames((prev) => ({
-            ...prev,
-            [key]: data.displayName ?? null,
-          }))
-        }
-        if (data.avatarUrl !== undefined) {
-          setCustomAvatars((prev) => ({
-            ...prev,
-            [key]: data.avatarUrl ?? null,
-          }))
-        }
-      })
-      .on('broadcast', { event: 'peer_visibility' }, (payload) => {
-        const data = payload.payload as {
-          from?: string
-          to?: string
-          peer?: string
-          hidden?: boolean
-          updatedAt?: string
-        }
-        if (!data?.from || !data?.to || !data.peer) return
-        if (data.to.toLowerCase() !== addressLower) return
-        applyPeerVisibility(
-          data.peer,
-          Boolean(data.hidden),
-          data.updatedAt ?? new Date().toISOString(),
-          { force: true },
-        )
-      })
-      .on('broadcast', { event: 'secret_visibility' }, (payload) => {
-        const data = payload.payload as {
-          from?: string
-          to?: string
-          peer?: string
-          hidden?: boolean
-          updatedAt?: string
-        }
-        if (!data?.from || !data?.to || !data.peer) return
-        if (data.to.toLowerCase() !== addressLower) return
-        applySecretVisibility(
-          data.peer,
-          Boolean(data.hidden),
-          data.updatedAt ?? new Date().toISOString(),
-          { force: true },
-        )
-      })
-      .on('broadcast', { event: 'message_hint' }, (payload) => {
-        const data = payload.payload as {
-          from?: string
-          to?: string
-          deviceId?: string
-          txHash?: string
-          since?: string
-        }
-        if (!data?.from || !data?.to) return
-        if (data.to.toLowerCase() !== addressLower) return
-        if (data.deviceId === deviceIdRef.current) return
-        syncLog('message_hint_receive', {
-          from: data.from?.toLowerCase(),
-          txHash: data.txHash,
-          since: data.since,
-          deviceId: data.deviceId,
-        })
-        const since = data.since ?? lastMessageTimestampRef.current
-        void fetchMessageUpdates({ since, txHash: data.txHash })
-      })
-      .on('broadcast', { event: 'sync_request' }, (payload) => {
-        const data = payload.payload as {
-          from?: string
-          to?: string
-          deviceId?: string
-        }
-        if (!data?.from || !data?.to || !data.deviceId) return
-        if (data.to.toLowerCase() !== addressLower) return
-        if (data.deviceId === deviceIdRef.current) return
-        if (document.visibilityState === 'hidden') return
-        channel.send({
-          type: 'broadcast',
-          event: 'sync_state',
-          payload: {
-            from: addressLower,
-            to: addressLower,
-            deviceId: data.deviceId,
-            hiddenPeers: hiddenPeersRef.current,
-            peerVisibilityUpdatedAt: peerVisibilityUpdatedAtRef.current,
-            hiddenSecretPeers: hiddenSecretPeersRef.current,
-            secretVisibilityUpdatedAt: secretVisibilityUpdatedAtRef.current,
-            customNames: customNamesRef.current,
-            customAvatars: customAvatarsRef.current,
-          },
-        })
-      })
-      .on('broadcast', { event: 'sync_state' }, (payload) => {
-        const data = payload.payload as {
-          from?: string
-          to?: string
-          deviceId?: string
-          hiddenPeers?: string[]
-          peerVisibilityUpdatedAt?: Record<string, string>
-          hiddenSecretPeers?: string[]
-          secretVisibilityUpdatedAt?: Record<string, string>
-          customNames?: Record<string, string | null>
-          customAvatars?: Record<string, string | null>
-        }
-        if (!data?.from || !data?.to || !data.deviceId) return
-        if (data.to.toLowerCase() !== addressLower) return
-        if (data.deviceId !== deviceIdRef.current) return
-        const incomingHidden = new Set(
-          Array.isArray(data.hiddenPeers)
-            ? data.hiddenPeers.map((peer) => peer.toLowerCase())
-            : [],
-        )
-        const incomingUpdatedAt =
-          data.peerVisibilityUpdatedAt && typeof data.peerVisibilityUpdatedAt === 'object'
-            ? data.peerVisibilityUpdatedAt
-            : {}
-        const visibilityPeers = new Set([
-          ...Object.keys(incomingUpdatedAt),
-          ...incomingHidden,
-        ])
-        visibilityPeers.forEach((peer) => {
-          const updatedAt = incomingUpdatedAt[peer] ?? '1970-01-01'
-          applyPeerVisibility(peer, incomingHidden.has(peer), updatedAt, {
-            force: true,
-          })
-        })
-        const incomingSecretHidden = new Set(
-          Array.isArray(data.hiddenSecretPeers)
-            ? data.hiddenSecretPeers.map((peer) => peer.toLowerCase())
-            : [],
-        )
-        const incomingSecretUpdatedAt =
-          data.secretVisibilityUpdatedAt &&
-          typeof data.secretVisibilityUpdatedAt === 'object'
-            ? data.secretVisibilityUpdatedAt
-            : {}
-        const secretPeers = new Set([
-          ...Object.keys(incomingSecretUpdatedAt),
-          ...incomingSecretHidden,
-        ])
-        secretPeers.forEach((peer) => {
-          const updatedAt = incomingSecretUpdatedAt[peer] ?? '1970-01-01'
-          applySecretVisibility(peer, incomingSecretHidden.has(peer), updatedAt, {
-            force: true,
-          })
-        })
-        if (data.customNames && typeof data.customNames === 'object') {
-          setCustomNames((prev) => ({ ...prev, ...data.customNames }))
-        }
-        if (data.customAvatars && typeof data.customAvatars === 'object') {
-          setCustomAvatars((prev) => ({ ...prev, ...data.customAvatars }))
-        }
-      })
-      .subscribe((status) => {
-        syncLog('signals_status', { status })
-        if (status === 'SUBSCRIBED') {
-          channel.send({
-            type: 'broadcast',
-            event: 'sync_request',
-            payload: {
-              from: addressLower,
-              to: addressLower,
-              deviceId: deviceIdRef.current,
-            },
-          })
-        }
-      })
-
-    return () => {
-      channel.unsubscribe()
-      signalsChannelRef.current = null
-    }
-  }, [address, applyPeerVisibility, applySecretVisibility, fetchMessageUpdates, syncLog, supabaseAuthed])
+    signalsChannelRef.current = null
+  }, [])
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -2749,67 +2220,30 @@ function App() {
   }, [])
 
   const emitPresence = useCallback((active: boolean) => {
-    if (!signalsChannelRef.current || !address || !activePeerValid) return
-    signalsChannelRef.current.send({
-      type: 'broadcast',
-      event: 'presence',
-      payload: {
-        from: address.toLowerCase(),
-        to: activePeer.toLowerCase(),
-        active,
-      },
-    })
-  }, [address, activePeerValid, activePeer])
+    if (!address || !activePeerValid) return
+    void active
+  }, [address, activePeerValid])
 
   const emitTyping = (typing: boolean) => {
-    if (!signalsChannelRef.current || !address || !activePeerValid) return
-    const now = Date.now()
-    if (typing && now - lastTypingSentRef.current < 1500) return
-    if (typing) lastTypingSentRef.current = now
-    signalsChannelRef.current.send({
-      type: 'broadcast',
-      event: 'typing',
-      payload: {
-        from: address.toLowerCase(),
-        to: activePeer.toLowerCase(),
-        typing,
-      },
-    })
+    if (!address || !activePeerValid) return
+    void typing
   }
 
   const emitProfileSync = useCallback(
     (displayName: string | null, avatarUrl: string | null) => {
-      if (!signalsChannelRef.current || !address) return
-      const addressLower = address.toLowerCase()
-      signalsChannelRef.current.send({
-        type: 'broadcast',
-        event: 'profile',
-        payload: {
-          from: addressLower,
-          to: addressLower,
-          displayName,
-          avatarUrl,
-        },
-      })
+      if (!address) return
+      void displayName
+      void avatarUrl
     },
     [address],
   )
 
   const emitPeerVisibility = useCallback(
     (peer: string, hidden: boolean, updatedAt: string) => {
-      if (!signalsChannelRef.current || !address) return
-      const addressLower = address.toLowerCase()
-      signalsChannelRef.current.send({
-        type: 'broadcast',
-        event: 'peer_visibility',
-        payload: {
-          from: addressLower,
-          to: addressLower,
-          peer,
-          hidden,
-          updatedAt,
-        },
-      })
+      if (!address) return
+      void peer
+      void hidden
+      void updatedAt
     },
     [address],
   )
@@ -2839,15 +2273,7 @@ function App() {
       if (latest <= current) return prev
       return { ...prev, [peerLower]: latest }
     })
-    signalsChannelRef.current?.send({
-      type: 'broadcast',
-      event: 'read',
-      payload: {
-        from: address.toLowerCase(),
-        to: peerLower,
-        readAt: latest,
-      },
-    })
+    void peerLower
   }, [address, activePeerValid, activePeer, visibleMessages])
 
   const handleRemovePeer = (peer: string) => {
@@ -3090,34 +2516,20 @@ function App() {
             : message,
         ),
       )
-      if (supabase) {
-        await supabase.from('messages').upsert(
-          [
-            {
-              tx_hash: hash,
-              from_address: addressLower,
-              to_address: peerLower,
-              text: payload,
-              created_at: createdAt,
-              chain_id: abstract.id,
-            },
-          ],
-          { onConflict: 'tx_hash' },
-        )
+      if (backendAuthed) {
+        await apiFetch('/messages', {
+          method: 'POST',
+          body: JSON.stringify({
+            tx_hash: hash,
+            from_address: addressLower,
+            to_address: peerLower,
+            text: payload,
+            created_at: createdAt,
+            chain_id: abstract.id,
+          }),
+        })
         syncLog('send_upsert', { txHash: hash, createdAt })
       }
-      signalsChannelRef.current?.send({
-        type: 'broadcast',
-        event: 'message_hint',
-        payload: {
-          from: addressLower,
-          to: addressLower,
-          deviceId: deviceIdRef.current,
-          txHash: hash,
-          since: createdAt,
-        },
-      })
-      syncLog('send_hint', { txHash: hash, createdAt })
     } catch (err) {
       const message = getErrorMessage(err)
       syncLog('send_error', { error: message })
