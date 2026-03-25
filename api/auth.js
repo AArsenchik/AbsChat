@@ -1,4 +1,5 @@
-import { verifyMessage } from 'viem'
+import { createPublicClient, http, isAddress, verifyMessage } from 'viem'
+import { abstract } from 'viem/chains'
 import { signJwt } from './_utils.js'
 
 const json = (res, status, body) => {
@@ -7,6 +8,10 @@ const json = (res, status, body) => {
 }
 
 const getSecret = () => process.env.JWT_SECRET || process.env.SUPABASE_JWT_SECRET || ''
+const publicClient = createPublicClient({
+  chain: abstract,
+  transport: http(),
+})
 
 const extractSignatureString = (value) => {
   if (typeof value === 'string') return value
@@ -23,9 +28,8 @@ const hexNormalize = (hex) => {
   const clean = hex.startsWith('0x') ? hex.slice(2) : hex
   if (!clean) return ''
   if (!/^[0-9a-fA-F]+$/.test(clean)) return ''
-  if (clean.length === 130) return `0x${clean}`
-  if (clean.length === 132 && hex.startsWith('0x')) return `0x${clean.slice(2)}`
-  return ''
+  if (clean.length % 2 !== 0) return ''
+  return `0x${clean}`
 }
 
 const base64ToHex = (value) => {
@@ -84,16 +88,25 @@ export default async function handler(req, res) {
   try {
     const { address, message, signature } = req.body || {}
     const normalizedSignature = normalizeSignature(signature)
-    if (!address || !message || !normalizedSignature) {
+    if (!address || !message || !normalizedSignature || !isAddress(address)) {
       json(res, 400, { error: 'Invalid payload or signature format' })
       return
     }
     const addressLower = String(address).toLowerCase()
-    const valid = await verifyMessage({
-      address: addressLower,
-      message,
-      signature: normalizedSignature,
-    })
+    let valid = false
+    try {
+      valid = await publicClient.verifyMessage({
+        address: addressLower,
+        message,
+        signature: normalizedSignature,
+      })
+    } catch {
+      valid = await verifyMessage({
+        address: addressLower,
+        message,
+        signature: normalizedSignature,
+      })
+    }
     if (!valid) {
       json(res, 401, { error: 'Invalid signature' })
       return
