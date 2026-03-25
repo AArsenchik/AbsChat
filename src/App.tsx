@@ -1,8 +1,10 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
-import { useAbstractClient, useLoginWithAbstract } from '@abstract-foundation/agw-react'
+import { useAbstractClient, useLoginWithAbstract, useCreateSession } from '@abstract-foundation/agw-react'
 import { useAccount, usePublicClient, useSignMessage } from 'wagmi'
-import { fromHex, isAddress, toHex, type Address } from 'viem'
+import { fromHex, isAddress, toHex, parseEther, type Address } from 'viem'
 import { abstract } from 'viem/chains'
+import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
+import { LimitType, type SessionConfig } from '@abstract-foundation/agw-client/sessions'
 import './App.css'
 
 type MessageStatus = 'pending' | 'sent' | 'failed'
@@ -647,6 +649,7 @@ function App() {
   const { login, logout } = useLoginWithAbstract()
   const { address, status } = useAccount()
   const { data: abstractClient } = useAbstractClient()
+  const { createSessionAsync, isPending: isCreatingSession } = useCreateSession()
   const publicClient = usePublicClient({ chainId: abstract.id })
   const { signMessageAsync } = useSignMessage()
 
@@ -1002,14 +1005,15 @@ function App() {
   const activePeerValid = activePeer ? isAddress(activePeer) : false
 
   useEffect(() => {
-    if (connected) void ensureBackendAuth()
-  }, [connected, ensureBackendAuth])
-
-  useEffect(() => {
     if (!connected) {
       setBackendAuthed(false)
     }
   }, [connected])
+
+  useEffect(() => {
+    if (!connected || backendAuthed || !activePeerValid) return
+    void ensureBackendAuth()
+  }, [connected, backendAuthed, activePeerValid, ensureBackendAuth])
 
   useEffect(() => {
     if (!address) return
@@ -1029,6 +1033,65 @@ function App() {
   const t = dict[lang as keyof typeof dict] || dict.en
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [emojiOpen, setEmojiOpen] = useState(false)
+  const [sessionEnabled, setSessionEnabled] = useState<boolean>(() => {
+    const saved = localStorage.getItem('sessionEnabled')
+    return saved === 'true'
+  })
+
+  const handleCreateSession = async () => {
+    if (!abstractClient || !address) return
+    try {
+      const sessionPrivateKey = generatePrivateKey()
+      const sessionSigner = privateKeyToAccount(sessionPrivateKey)
+      const session: SessionConfig = {
+        signer: sessionSigner.address,
+        expiresAt: BigInt(Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 7),
+        feeLimit: {
+          limitType: LimitType.Lifetime,
+          limit: parseEther('10'),
+          period: BigInt(0),
+        },
+        callPolicies: [],
+        transferPolicies: [
+          {
+            target: address as Address,
+            maxValuePerUse: parseEther('0'),
+            valueLimit: {
+              limitType: LimitType.Unlimited,
+              limit: BigInt(0),
+              period: BigInt(0),
+            },
+          },
+        ],
+      }
+      await createSessionAsync({ session })
+      localStorage.setItem(
+        `session:${address.toLowerCase()}`,
+        JSON.stringify({ privateKey: sessionPrivateKey, session }),
+      )
+      setSessionEnabled(true)
+      alert('Session created! You can now chat without signing transactions.')
+    } catch (err: unknown) {
+      console.error(err)
+      const msg = getErrorMessage(err)
+      if (msg.includes('Status: Unset') || msg.includes('Policy violation')) {
+        alert(
+          'Session creation failed: Session keys on Abstract Mainnet are currently restricted to whitelisted apps. ' +
+            'This feature will be available once the app is whitelisted. ' +
+            'Please continue signing transactions manually for now.',
+        )
+      } else {
+        alert(`Failed to create session: ${msg}`)
+      }
+      setSessionEnabled(false)
+    }
+  }
+
+  const handleRevokeSession = () => {
+    localStorage.removeItem(`session:${address?.toLowerCase()}`)
+    setSessionEnabled(false)
+    alert('Session revoked.')
+  }
 
   const peers = useMemo(() => {
     const set = new Set<string>()
@@ -1538,6 +1601,10 @@ function App() {
   useEffect(() => {
     localStorage.setItem('lang', lang)
   }, [lang])
+
+  useEffect(() => {
+    localStorage.setItem('sessionEnabled', String(sessionEnabled))
+  }, [sessionEnabled])
 
 
 
@@ -2384,22 +2451,49 @@ function App() {
     setError(null)
 
     try {
+      let hash
+      const sessionData = localStorage.getItem(`session:${addressLower}`)
+      if (sessionEnabled && sessionData) {
+        try {
+          const { privateKey, session } = JSON.parse(sessionData)
+          const sessionSigner = privateKeyToAccount(privateKey)
+          const sessionClient = abstractClient.toSessionClient(sessionSigner, session)
+          hash = await sessionClient.sendTransaction({
+            account: sessionClient.account,
+            to: address as Address,
+            chain: abstract,
+            data: toHex(payload),
+            value: 0n,
+          })
+        } catch (e) {
+          const sessionError = getErrorMessage(e)
+          if (
+            sessionError.toLowerCase().includes('failed to initialize request') ||
+            sessionError.toLowerCase().includes('session')
+          ) {
+            localStorage.removeItem(`session:${addressLower}`)
+            setSessionEnabled(false)
+          }
+          console.warn('Session failed, falling back to wallet', e)
+        }
+      }
       const sendWithWallet = async () =>
         abstractClient.sendTransaction({
           to: address as `0x${string}`,
           data: toHex(payload),
           value: 0n,
         })
-      let hash
-      try {
-        hash = await sendWithWallet()
-      } catch (e) {
-        const walletError = getErrorMessage(e)
-        if (walletError.toLowerCase().includes('failed to initialize request')) {
-          await wait(400)
+      if (!hash) {
+        try {
           hash = await sendWithWallet()
-        } else {
-          throw e
+        } catch (e) {
+          const walletError = getErrorMessage(e)
+          if (walletError.toLowerCase().includes('failed to initialize request')) {
+            await wait(400)
+            hash = await sendWithWallet()
+          } else {
+            throw e
+          }
         }
       }
 
@@ -3182,6 +3276,28 @@ function App() {
                   <option value="ko">한국어</option>
                   <option value="ja">日本語</option>
                 </select>
+              </div>
+            </div>
+            <div className="settings__row">
+              <div>{t.session}</div>
+              <div className="settings__actions">
+                {sessionEnabled ? (
+                  <button
+                    className="btn settings__control"
+                    style={{ background: 'rgba(220, 40, 60, 0.8)' }}
+                    onClick={handleRevokeSession}
+                  >
+                    {t.revokeSession}
+                  </button>
+                ) : (
+                  <button
+                    className="btn settings__control"
+                    onClick={handleCreateSession}
+                    disabled={sessionEnabled || isCreatingSession}
+                  >
+                    {isCreatingSession ? t.signing : t.session}
+                  </button>
+                )}
               </div>
             </div>
             <div className="settings__row">
