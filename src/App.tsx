@@ -1320,14 +1320,18 @@ function App() {
       const from = message.from.toLowerCase()
       const to = message.to.toLowerCase()
       if (to !== own || from === own) continue
-      if (from === active) continue
+      const isSecretMessage = message.payload.startsWith(SECRET_ENCRYPTED_PREFIX)
+      const isActiveSameThread =
+        from === active && ((activeSecret && isSecretMessage) || (!activeSecret && !isSecretMessage))
+      if (isActiveSameThread) continue
       const lastRead = lastReadByPeer[from] ?? '1970-01-01'
       if (message.createdAt > lastRead) {
-        next[from] = true
+        const key = `${from}:${isSecretMessage ? 'secret' : 'main'}`
+        next[key] = true
       }
     }
     return next
-  }, [address, activePeer, lastReadByPeer, messages])
+  }, [address, activePeer, activeSecret, lastReadByPeer, messages])
 
   const visibleMessages = useMemo(() => {
     if (!address || !activePeerValid) return []
@@ -2316,11 +2320,14 @@ function App() {
     emitPeerVisibility(peerLower, false, updatedAt)
   }
 
-  const handleSaveSecretPassphrase = async () => {
+  const handleSaveSecretPassphrase = () => {
     if (!activePeerValid) return
     const peerLower = activePeer.toLowerCase()
     const next = secretPassphraseDraft.trim()
-    if (activeSecret && address) {
+    const prevSaved = secretPassphrases[peerLower] ?? ''
+    const passphraseChanged = next !== prevSaved
+    if (activeSecret && address && passphraseChanged) {
+      setConversationKey(null)
       const own = address.toLowerCase()
       setMessages((prev) => {
         let changed = false
@@ -2349,17 +2356,7 @@ function App() {
     setSecretPassphraseDraft(next)
     if (activeSecret) {
       setChatKeySaved(next)
-      if (!next) {
-        setConversationKey(null)
-      } else if (address) {
-        try {
-          const salt = await getConversationSalt(address, activePeer)
-          const key = await deriveKey(next, salt)
-          setConversationKey(key)
-        } catch {
-          setConversationKey(null)
-        }
-      }
+      if (!next) setConversationKey(null)
     }
     setError(null)
   }
@@ -2946,7 +2943,8 @@ function App() {
                         ✕
                       </div>
                     )}
-                    {!isEditing && unreadPeers[peerLower] && (
+                    {!isEditing &&
+                      unreadPeers[`${peerLower}:${isSecretCard ? 'secret' : 'main'}`] && (
                       <div className="peer__unread">!</div>
                     )}
                     {isSecretCard && (
