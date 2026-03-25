@@ -5,9 +5,11 @@ const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
 
 const getAccessToken = async () => {
   if (typeof localStorage === 'undefined') return null
-  const token = localStorage.getItem('supabaseAccessToken')
+  const token =
+    localStorage.getItem('abschatAuthToken') ?? localStorage.getItem('supabaseAccessToken')
   if (!token) return null
-  const expValue = localStorage.getItem('supabaseAccessTokenExp')
+  const expValue =
+    localStorage.getItem('abschatAuthExp') ?? localStorage.getItem('supabaseAccessTokenExp')
   if (!expValue) return token
   const exp = Number(expValue)
   if (!Number.isFinite(exp)) return token

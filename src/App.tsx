@@ -5,6 +5,7 @@ import { fromHex, isAddress, toHex, parseEther, type Address } from 'viem'
 import { abstract } from 'viem/chains'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import { LimitType, type SessionConfig } from '@abstract-foundation/agw-client/sessions'
+import { supabase } from './lib/supabase'
 import './App.css'
 
 type MessageStatus = 'pending' | 'sent' | 'failed'
@@ -677,17 +678,21 @@ function App() {
   const activeSecretRef = useRef<boolean>(false)
   const [lastReadByPeer, setLastReadByPeer] = useState<Record<string, string>>({})
   const [readReceiptsByPeer, setReadReceiptsByPeer] = useState<Record<string, string>>({})
-  const [typingPeers] = useState<Record<string, boolean>>({})
-  const [onlinePeers] = useState<Record<string, number>>({})
+  const [typingPeers, setTypingPeers] = useState<Record<string, boolean>>({})
+  const [onlinePeers, setOnlinePeers] = useState<Record<string, number>>({})
   const [onlineTick, setOnlineTick] = useState<number>(() => Date.now())
+  const typingTimeoutsRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const typingSendTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastTypingSentRef = useRef<number>(0)
   const pollMessagesInFlightRef = useRef(false)
   const pollActiveMessagesInFlightRef = useRef(false)
   const pollIncomingInFlightRef = useRef(false)
   const profileCacheRef = useRef<
     Record<string, { displayName: string | null; avatarUrl: string | null; ts: number }>
   >({})
-  const signalsChannelRef = useRef<null>(null)
+  const signalsChannelRef = useRef<
+    ReturnType<NonNullable<typeof supabase>['channel']> | null
+  >(null)
   const deviceIdRef = useRef<string>(
     typeof crypto !== 'undefined' && 'randomUUID' in crypto
       ? crypto.randomUUID()
@@ -752,6 +757,7 @@ function App() {
       storedAddress === addressLower &&
       (!storedExpRaw || hasValidExp)
     if (canReuseToken) {
+      supabase?.realtime.setAuth(storedToken)
       setBackendAuthed(true)
       return
     }
@@ -775,6 +781,7 @@ function App() {
         localStorage.setItem(BACKEND_AUTH_EXP_KEY, String(data.expires_at))
       }
       localStorage.setItem(BACKEND_AUTH_ADDRESS_KEY, addressLower)
+      supabase?.realtime.setAuth(data.access_token)
       setBackendAuthed(true)
     } catch (err) {
       setError(getErrorMessage(err))
@@ -785,11 +792,20 @@ function App() {
   }, [address, signMessageAsync])
 
   const emitSecretVisibility = useCallback(
-    (_peer: string, _hidden: boolean, _updatedAt: string) => {
-      if (!address) return
-      void _peer
-      void _hidden
-      void _updatedAt
+    (peer: string, hidden: boolean, updatedAt: string) => {
+      if (!signalsChannelRef.current || !address) return
+      const addressLower = address.toLowerCase()
+      void signalsChannelRef.current.send({
+        type: 'broadcast',
+        event: 'secret_visibility',
+        payload: {
+          from: addressLower,
+          to: addressLower,
+          peer,
+          hidden,
+          updatedAt,
+        },
+      })
     },
     [address],
   )
@@ -2204,8 +2220,122 @@ function App() {
   }, [address, publicClient, peers, activePeerValid, syncLog, apiFetch, backendAuthed])
 
   useEffect(() => {
-    signalsChannelRef.current = null
-  }, [])
+    if (!supabase || !backendAuthed || !address) {
+      signalsChannelRef.current = null
+      return
+    }
+    const token = getBackendToken()
+    if (token) {
+      supabase.realtime.setAuth(token)
+    }
+    const addressLower = address.toLowerCase()
+    const channel = supabase.channel('chat:signals')
+    signalsChannelRef.current = channel
+    channel
+      .on('broadcast', { event: 'presence' }, (payload: { payload: unknown }) => {
+        const data = payload.payload as { from?: string; to?: string; active?: boolean }
+        if (!data?.from || !data?.to) return
+        if (data.to.toLowerCase() !== addressLower) return
+        const peerLower = data.from.toLowerCase()
+        setOnlinePeers((prev) => {
+          if (data.active === false) {
+            if (!prev[peerLower]) return prev
+            const next = { ...prev }
+            delete next[peerLower]
+            return next
+          }
+          return { ...prev, [peerLower]: Date.now() }
+        })
+      })
+      .on('broadcast', { event: 'typing' }, (payload: { payload: unknown }) => {
+        const data = payload.payload as { from?: string; to?: string; typing?: boolean }
+        if (!data?.from || !data?.to) return
+        if (data.to.toLowerCase() !== addressLower) return
+        const peerLower = data.from.toLowerCase()
+        if (data.typing) {
+          setTypingPeers((prev) => ({ ...prev, [peerLower]: true }))
+          if (typingTimeoutsRef.current[peerLower]) {
+            clearTimeout(typingTimeoutsRef.current[peerLower])
+          }
+          typingTimeoutsRef.current[peerLower] = setTimeout(() => {
+            setTypingPeers((prev) => ({ ...prev, [peerLower]: false }))
+          }, 5500)
+        } else {
+          if (typingTimeoutsRef.current[peerLower]) {
+            clearTimeout(typingTimeoutsRef.current[peerLower])
+          }
+          setTypingPeers((prev) => ({ ...prev, [peerLower]: false }))
+        }
+      })
+      .on('broadcast', { event: 'read' }, (payload: { payload: unknown }) => {
+        const data = payload.payload as { from?: string; to?: string; readAt?: string }
+        if (!data?.from || !data?.to || !data.readAt) return
+        if (data.to.toLowerCase() !== addressLower) return
+        const peerLower = data.from.toLowerCase()
+        const readAt = data.readAt
+        setReadReceiptsByPeer((prev) => {
+          const current = prev[peerLower] ?? '1970-01-01'
+          if (readAt <= current) return prev
+          return { ...prev, [peerLower]: readAt }
+        })
+      })
+      .on('broadcast', { event: 'profile' }, (payload: { payload: unknown }) => {
+        const data = payload.payload as {
+          from?: string
+          to?: string
+          displayName?: string | null
+          avatarUrl?: string | null
+        }
+        if (!data?.from || !data?.to) return
+        if (data.to.toLowerCase() !== addressLower) return
+        const key = data.from.toLowerCase()
+        if (data.displayName !== undefined) {
+          setCustomNames((prev) => ({ ...prev, [key]: data.displayName ?? null }))
+        }
+        if (data.avatarUrl !== undefined) {
+          setCustomAvatars((prev) => ({ ...prev, [key]: data.avatarUrl ?? null }))
+        }
+      })
+      .on('broadcast', { event: 'peer_visibility' }, (payload: { payload: unknown }) => {
+        const data = payload.payload as {
+          from?: string
+          to?: string
+          peer?: string
+          hidden?: boolean
+          updatedAt?: string
+        }
+        if (!data?.from || !data?.to || !data.peer) return
+        if (data.to.toLowerCase() !== addressLower) return
+        applyPeerVisibility(
+          data.peer,
+          Boolean(data.hidden),
+          data.updatedAt ?? new Date().toISOString(),
+          { force: true },
+        )
+      })
+      .on('broadcast', { event: 'secret_visibility' }, (payload: { payload: unknown }) => {
+        const data = payload.payload as {
+          from?: string
+          to?: string
+          peer?: string
+          hidden?: boolean
+          updatedAt?: string
+        }
+        if (!data?.from || !data?.to || !data.peer) return
+        if (data.to.toLowerCase() !== addressLower) return
+        applySecretVisibility(
+          data.peer,
+          Boolean(data.hidden),
+          data.updatedAt ?? new Date().toISOString(),
+          { force: true },
+        )
+      })
+      .subscribe()
+    return () => {
+      channel.unsubscribe()
+      signalsChannelRef.current = null
+    }
+  }, [address, backendAuthed, getBackendToken, applyPeerVisibility, applySecretVisibility])
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -2215,30 +2345,67 @@ function App() {
   }, [])
 
   const emitPresence = useCallback((active: boolean) => {
-    if (!address || !activePeerValid) return
-    void active
-  }, [address, activePeerValid])
+    if (!signalsChannelRef.current || !address || !activePeerValid) return
+    void signalsChannelRef.current.send({
+      type: 'broadcast',
+      event: 'presence',
+      payload: {
+        from: address.toLowerCase(),
+        to: activePeer.toLowerCase(),
+        active,
+      },
+    })
+  }, [address, activePeerValid, activePeer])
 
   const emitTyping = (typing: boolean) => {
-    if (!address || !activePeerValid) return
-    void typing
+    if (!signalsChannelRef.current || !address || !activePeerValid) return
+    const now = Date.now()
+    if (typing && now - lastTypingSentRef.current < 1500) return
+    if (typing) lastTypingSentRef.current = now
+    void signalsChannelRef.current.send({
+      type: 'broadcast',
+      event: 'typing',
+      payload: {
+        from: address.toLowerCase(),
+        to: activePeer.toLowerCase(),
+        typing,
+      },
+    })
   }
 
   const emitProfileSync = useCallback(
     (displayName: string | null, avatarUrl: string | null) => {
-      if (!address) return
-      void displayName
-      void avatarUrl
+      if (!signalsChannelRef.current || !address) return
+      const addressLower = address.toLowerCase()
+      void signalsChannelRef.current.send({
+        type: 'broadcast',
+        event: 'profile',
+        payload: {
+          from: addressLower,
+          to: addressLower,
+          displayName,
+          avatarUrl,
+        },
+      })
     },
     [address],
   )
 
   const emitPeerVisibility = useCallback(
     (peer: string, hidden: boolean, updatedAt: string) => {
-      if (!address) return
-      void peer
-      void hidden
-      void updatedAt
+      if (!signalsChannelRef.current || !address) return
+      const addressLower = address.toLowerCase()
+      void signalsChannelRef.current.send({
+        type: 'broadcast',
+        event: 'peer_visibility',
+        payload: {
+          from: addressLower,
+          to: addressLower,
+          peer,
+          hidden,
+          updatedAt,
+        },
+      })
     },
     [address],
   )
@@ -2268,7 +2435,17 @@ function App() {
       if (latest <= current) return prev
       return { ...prev, [peerLower]: latest }
     })
-    void peerLower
+    if (signalsChannelRef.current) {
+      void signalsChannelRef.current.send({
+        type: 'broadcast',
+        event: 'read',
+        payload: {
+          from: address.toLowerCase(),
+          to: peerLower,
+          readAt: latest,
+        },
+      })
+    }
   }, [address, activePeerValid, activePeer, visibleMessages])
 
   const handleRemovePeer = (peer: string) => {
