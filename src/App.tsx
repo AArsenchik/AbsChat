@@ -1005,15 +1005,14 @@ function App() {
   const activePeerValid = activePeer ? isAddress(activePeer) : false
 
   useEffect(() => {
+    if (connected) void ensureBackendAuth()
+  }, [connected, ensureBackendAuth])
+
+  useEffect(() => {
     if (!connected) {
       setBackendAuthed(false)
     }
   }, [connected])
-
-  useEffect(() => {
-    if (!connected || backendAuthed || !activePeerValid) return
-    void ensureBackendAuth()
-  }, [connected, backendAuthed, activePeerValid, ensureBackendAuth])
 
   useEffect(() => {
     if (!address) return
@@ -1092,6 +1091,7 @@ function App() {
     setSessionEnabled(false)
     alert('Session revoked.')
   }
+
 
   const peers = useMemo(() => {
     const set = new Set<string>()

@@ -8,6 +8,20 @@ const json = (res, status, body) => {
 
 const getSecret = () => process.env.JWT_SECRET || process.env.SUPABASE_JWT_SECRET || ''
 
+const normalizeSignature = (value) => {
+  if (typeof value !== 'string') return ''
+  if (value.startsWith('0x')) return value
+  try {
+    const buffer = Buffer.from(value, 'base64')
+    if (buffer.length === 65) {
+      return `0x${buffer.toString('hex')}`
+    }
+  } catch {
+    return value
+  }
+  return value
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     res.status(405).end()
@@ -20,7 +34,8 @@ export default async function handler(req, res) {
   }
   try {
     const { address, message, signature } = req.body || {}
-    if (!address || !message || !signature) {
+    const normalizedSignature = normalizeSignature(signature)
+    if (!address || !message || !normalizedSignature) {
       json(res, 400, { error: 'Invalid payload' })
       return
     }
@@ -28,7 +43,7 @@ export default async function handler(req, res) {
     const valid = await verifyMessage({
       address: addressLower,
       message,
-      signature,
+      signature: normalizedSignature,
     })
     if (!valid) {
       json(res, 401, { error: 'Invalid signature' })
@@ -51,4 +66,3 @@ export default async function handler(req, res) {
     json(res, 500, { error: err instanceof Error ? err.message : 'Auth failed' })
   }
 }
-
