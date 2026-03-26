@@ -2678,7 +2678,10 @@ function App() {
             : message,
         ),
       )
-      if (backendAuthed) {
+      try {
+        if (!backendAuthed) {
+          await ensureBackendAuth()
+        }
         await apiFetch('/messages', {
           method: 'POST',
           body: JSON.stringify({
@@ -2691,6 +2694,11 @@ function App() {
           }),
         })
         syncLog('send_upsert', { txHash: hash, createdAt })
+      } catch (upsertError) {
+        syncLog('send_upsert_error', {
+          txHash: hash,
+          error: getErrorMessage(upsertError),
+        })
       }
     } catch (err) {
       const message = getErrorMessage(err)
