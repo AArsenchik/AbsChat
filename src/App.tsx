@@ -2781,8 +2781,12 @@ function App() {
   const handleProfileSave = async () => {
     if (!addressLower) return
     setProfileError(null)
-    setProfileSaving(true)
     const nextName = profileNameDraft.trim()
+    if (nextName && nextName.length < 3) {
+      setProfileError('Username must contain at least 3 characters')
+      return
+    }
+    setProfileSaving(true)
     const previousName = customNames[addressLower] ?? null
     setCustomNames((prev) => ({ ...prev, [addressLower]: nextName || null }))
     try {
@@ -2814,7 +2818,14 @@ function App() {
     } catch (err) {
       console.error('Profile save error:', err)
       if (!isAbortError(err)) {
-        setProfileError(getErrorMessage(err))
+        const errorMessage = getErrorMessage(err)
+        if (errorMessage.toLowerCase().includes('already taken')) {
+          setProfileError('This username is already taken')
+        } else if (errorMessage.toLowerCase().includes('at least 3')) {
+          setProfileError('Username must contain at least 3 characters')
+        } else {
+          setProfileError(errorMessage)
+        }
         setCustomNames((prev) => ({ ...prev, [addressLower]: previousName }))
       }
     } finally {

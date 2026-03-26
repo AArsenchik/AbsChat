@@ -69,8 +69,9 @@
         <p>
           Abstract Messenger enables address-based chats. Messages are transmitted as on-chain
           transactions on AbstractChain, and mirrored to an indexed datastore for fast retrieval
-          and cross-device availability. Regular chats use deterministic client-side encryption for
-          privacy, while Secret chats use password-based E2EE.
+          and cross-device availability. The app now uses a backend-gated data flow for regular
+          chats and profile data: frontend requests are authenticated and routed through backend API
+          before data is read or written in Supabase.
         </p>
 
         <h2>Key Advantages over Web2</h2>
@@ -96,14 +97,25 @@
 
         <h2>Realtime and Reliability</h2>
         <ul class="list">
-          <li>Realtime: Supabase Postgres changes subscriptions for instant updates.</li>
-          <li>Fallback: Periodic polling ensures delivery when realtime is unavailable.</li>
+          <li>Realtime: Broadcast channels sync online, typing, read receipts, and visibility across devices.</li>
+          <li>Fallback: Periodic polling and chain scanning ensure delivery when realtime is unavailable.</li>
           <li>Recovery: A light chain scanner can reconstruct missing messages from on-chain data.</li>
+        </ul>
+
+        <h2>Backend Security Model</h2>
+        <ul class="list">
+          <li>Data path: Frontend → Backend API → Supabase.</li>
+          <li>Auth: Wallet signature is exchanged for a short-lived JWT used by backend endpoints.</li>
+          <li>Secrets: Service Role key is stored only on backend and never exposed to browser code.</li>
+          <li>Authorization: Backend validates requester identity before profile/message operations.</li>
+          <li>Client access: Browser uses anon credentials only for realtime signaling.</li>
         </ul>
 
         <h2>Profiles and Identity</h2>
         <ul class="list">
           <li>Users set their own display name and avatar directly in the app.</li>
+          <li>Usernames must contain at least 3 characters.</li>
+          <li>Usernames are unique: one name cannot be assigned to multiple addresses.</li>
           <li>Profile updates are stored and synced across devices via the indexed datastore.</li>
           <li>When no profile is set, the UI falls back to a shortened address.</li>
         </ul>
@@ -146,7 +158,8 @@
           <li>Regular chats are not E2EE; they use deterministic encryption derived from addresses.</li>
           <li>A compromised device can expose locally cached messages and encryption keys.</li>
           <li>Addresses and timestamps are public on-chain; metadata is always visible.</li>
-          <li>Supabase policies allow public read/write of encrypted payloads; treat it as public data.</li>
+          <li>Supabase service role remains backend-only; frontend does not receive privileged keys.</li>
+          <li>Backend-enforced checks reduce direct unauthorized data access through client APIs.</li>
           <li>Consider using fresh addresses for stronger unlinkability.</li>
         </ul>
 

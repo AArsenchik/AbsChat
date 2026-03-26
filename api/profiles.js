@@ -46,9 +46,41 @@ export default async function handler(req, res) {
       json(res, 403, { error: 'Forbidden' })
       return
     }
+    const displayNameRaw =
+      typeof payload.display_name === 'string' ? payload.display_name.trim() : ''
+    const displayName = displayNameRaw ? displayNameRaw : null
+    if (displayName && displayName.length < 3) {
+      json(res, 400, { error: 'Username must be at least 3 characters' })
+      return
+    }
+    if (displayName) {
+      const { data: duplicateRows, error: duplicateError } = await supabase
+        .from('profiles')
+        .select('address')
+        .ilike('display_name', displayName)
+        .neq('address', address)
+        .limit(1)
+      if (duplicateError) {
+        json(res, 500, { error: duplicateError.message })
+        return
+      }
+      if (Array.isArray(duplicateRows) && duplicateRows.length > 0) {
+        json(res, 409, { error: 'Username is already taken' })
+        return
+      }
+    }
+    const upsertPayload = {
+      address,
+      display_name: displayName,
+      avatar_url: typeof payload.avatar_url === 'string' ? payload.avatar_url : null,
+      updated_at:
+        typeof payload.updated_at === 'string'
+          ? payload.updated_at
+          : new Date().toISOString(),
+    }
     const { data, error } = await supabase
       .from('profiles')
-      .upsert([payload], { onConflict: 'address' })
+      .upsert([upsertPayload], { onConflict: 'address' })
       .select('address, display_name, avatar_url')
     if (error) {
       json(res, 500, { error: error.message })
@@ -61,4 +93,3 @@ export default async function handler(req, res) {
 
   res.status(405).end()
 }
-
