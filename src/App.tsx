@@ -2740,7 +2740,7 @@ function App() {
 
   const loadGroupDetails = useCallback(
     async (groupId: string, options?: { applyToProfile?: boolean }) => {
-      if (!backendAuthed || !address) return null
+      if (!address) return null
       const normalizedGroupId = normalizeGroupId(groupId)
       if (!normalizedGroupId) return null
       const applyToProfile = options?.applyToProfile ?? true
@@ -2812,7 +2812,7 @@ function App() {
       }
       return details
     },
-    [backendAuthed, address, apiFetch, loadProfiles],
+    [address, apiFetch, loadProfiles],
   )
 
   useEffect(() => {
@@ -5522,18 +5522,39 @@ function App() {
         setGroupProfileNameDraft(immediateDetails.name)
         setGroupProfileAvatarDraft(immediateDetails.avatar_url ?? null)
       }
-      setGroupProfileLoading(!immediateDetails)
+      const immediateHasMembers =
+        (immediateDetails?.members.length ?? 0) > 0 ||
+        (immediateDetails?.member_count ?? 0) === 0
+      setGroupProfileLoading(!immediateDetails || !immediateHasMembers)
       setGroupProfileEditing(false)
       setGroupProfileAddMoreOpen(false)
       setGroupProfileMemberQuery('')
       setGroupProfileMemberSearchResults([])
       try {
-        const details = await loadGroupDetails(normalizedGroupId)
+        let details: GroupDetails | null = null
+        try {
+          details = await loadGroupDetails(normalizedGroupId)
+        } catch (firstError) {
+          // Mobile reload often races backend auth; retry once before surfacing an error.
+          const firstMessage = getErrorMessage(firstError).toLowerCase()
+          const shouldRetry =
+            firstMessage.includes('auth failed') ||
+            firstMessage.includes('request failed') ||
+            firstMessage.includes('network')
+          if (!shouldRetry) throw firstError
+          await new Promise((resolve) => setTimeout(resolve, 350))
+          details = await loadGroupDetails(normalizedGroupId)
+        }
         if (!details) {
-          throw new Error('Group not found')
+          if (!immediateDetails) {
+            throw new Error('Group not found')
+          }
+          return
         }
       } catch (err) {
-        setGroupProfileError(formatGroupCreateError(err))
+        if (!immediateDetails) {
+          setGroupProfileError(formatGroupCreateError(err))
+        }
       } finally {
         setGroupProfileLoading(false)
       }
