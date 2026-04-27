@@ -533,12 +533,37 @@ const MessageList = memo(function MessageList({
 }: MessageListProps) {
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const longPressTriggeredRef = useRef(false)
+  const failedRemoveHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [failedRemoveVisibleKey, setFailedRemoveVisibleKey] = useState<string | null>(null)
   const clearLongPress = () => {
     if (longPressTimerRef.current) {
       clearTimeout(longPressTimerRef.current)
       longPressTimerRef.current = null
     }
   }
+  const clearFailedRemoveHideTimer = () => {
+    if (failedRemoveHideTimerRef.current) {
+      clearTimeout(failedRemoveHideTimerRef.current)
+      failedRemoveHideTimerRef.current = null
+    }
+  }
+  const showFailedRemove = (messageKey: string) => {
+    clearFailedRemoveHideTimer()
+    setFailedRemoveVisibleKey(messageKey)
+  }
+  const scheduleHideFailedRemove = () => {
+    clearFailedRemoveHideTimer()
+    failedRemoveHideTimerRef.current = setTimeout(() => {
+      setFailedRemoveVisibleKey(null)
+      failedRemoveHideTimerRef.current = null
+    }, 280)
+  }
+
+  useEffect(() => {
+    return () => {
+      clearFailedRemoveHideTimer()
+    }
+  }, [])
 
   if (visibleMessages.length === 0) {
     return (
@@ -578,6 +603,7 @@ const MessageList = memo(function MessageList({
         const imageUrls = extractMessageImageUrls(message.text)
         const messageText = stripMessageImageDirectives(message.text)
         const isFailedRemovable = Boolean(outgoing && message.status === 'failed')
+        const failedRemoveVisible = isFailedRemovable && failedRemoveVisibleKey === messageKey
         const statusLabel =
           message.status === 'pending'
             ? t.awaitSig
@@ -592,7 +618,15 @@ const MessageList = memo(function MessageList({
             key={message.id}
             className={`message-row ${outgoing ? 'message-row--out' : 'message-row--in'} ${
               isFailedRemovable ? 'message-row--failed' : ''
-            }`}
+            } ${failedRemoveVisible ? 'message-row--failed-visible' : ''}`}
+            onMouseEnter={() => {
+              if (!isFailedRemovable) return
+              showFailedRemove(messageKey)
+            }}
+            onMouseLeave={() => {
+              if (!isFailedRemovable) return
+              scheduleHideFailedRemove()
+            }}
           >
             <div className="message-row__main">
               {showGroupSenderMeta && (
@@ -616,7 +650,10 @@ const MessageList = memo(function MessageList({
                   onClick={(event) => {
                     event.stopPropagation()
                     onRemoveFailedMessage(message)
+                    setFailedRemoveVisibleKey(null)
                   }}
+                  onMouseEnter={() => showFailedRemove(messageKey)}
+                  onMouseLeave={scheduleHideFailedRemove}
                   type="button"
                   aria-label="Remove failed message"
                   title="Remove failed message"

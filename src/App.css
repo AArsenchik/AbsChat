@@ -2138,7 +2138,8 @@ html, body {
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .message-row--failed:hover .message__failed-remove {
+  .message-row--failed:hover .message__failed-remove,
+  .message-row--failed-visible .message__failed-remove {
     opacity: 1;
     pointer-events: auto;
     transform: translateY(-50%) scale(1);
