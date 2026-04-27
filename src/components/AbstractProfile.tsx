@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
 import { useAccount } from 'wagmi'
+import { extractPortalAvatarUrl } from '../lib/portalProfile'
+import { DEFAULT_PROFILE_AVATAR } from '../lib/defaultAvatars'
 
 interface AbstractProfileProps {
   address?: string
-  size?: 'sm' | 'md' | 'lg' | 'xl'
+  size?: 'sm' | 'md' | 'chat' | 'lg' | 'xl'
   className?: string
   showTooltip?: boolean
   fallback?: string
@@ -13,36 +15,6 @@ interface AbstractProfileProps {
 
 const avatarCache = new Map<string, { value: string | null; ts: number }>()
 const AVATAR_CACHE_TTL = 5 * 60 * 1000
-
-const imageUrlRegex = /https?:\/\/[^"'\s]+?\.(?:png|jpe?g|webp|gif)(?:\?[^"'\s]*)?/i
-
-function findImageUrl(data: unknown): string | null {
-  if (!data) return null
-  if (typeof data === 'string') {
-    return imageUrlRegex.test(data) ? data : null
-  }
-  if (Array.isArray(data)) {
-    for (const item of data) {
-      const found = findImageUrl(item)
-      if (found) return found
-    }
-  }
-  if (typeof data === 'object') {
-    for (const value of Object.values(data as Record<string, unknown>)) {
-      const found = findImageUrl(value)
-      if (found) return found
-    }
-  }
-  return null
-}
-
-function extractPortalAvatar(data: unknown): string | null {
-  if (!data || typeof data !== 'object') return null
-  const user = (data as { user?: unknown }).user
-  if (!user || typeof user !== 'object') return null
-  const override = (user as { overrideProfilePictureUrl?: unknown }).overrideProfilePictureUrl
-  return typeof override === 'string' && imageUrlRegex.test(override) ? override : null
-}
 
 export function AbstractProfile({ 
   address, 
@@ -60,6 +32,7 @@ export function AbstractProfile({
   const sizeStyles = {
     sm: { width: '28px', height: '28px' },
     md: { width: '48px', height: '48px' },
+    chat: { width: '40px', height: '40px' },
     lg: { width: '72px', height: '72px' },
     xl: { width: '128px', height: '128px' },
   }
@@ -73,8 +46,8 @@ export function AbstractProfile({
     fallbackStage === 2
       ? null
       : fallbackStage === 1
-        ? '/bpengu.png'
-        : remoteSrc ?? '/bpengu.png'
+        ? DEFAULT_PROFILE_AVATAR
+        : remoteSrc ?? DEFAULT_PROFILE_AVATAR
   const fallbackText =
     fallback ??
     (resolvedAddress
@@ -106,11 +79,9 @@ export function AbstractProfile({
           let found: string | null = null
           if (contentType.includes('application/json')) {
             const data = await response.json()
-            found = extractPortalAvatar(data) ?? findImageUrl(data)
+            found = extractPortalAvatarUrl(data)
           } else {
-            const text = await response.text()
-            const match = text.match(imageUrlRegex)
-            found = match ? match[0] : null
+            found = null
           }
           if (found) {
             avatarCache.set(normalizedAddress, { value: found, ts: Date.now() })

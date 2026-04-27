@@ -3,175 +3,268 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Abstract Messenger — Documentation</title>
+    <title>AbsChat Docs</title>
     <style>
+      :root {
+        color-scheme: dark;
+      }
       body {
         margin: 0;
-        font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
-        background: radial-gradient(circle at top, #0a1410, #060a08 55%, #050705 100%);
-        color: #e9f7ef;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: radial-gradient(circle at top, #0b1510, #060907 58%, #040505 100%);
+        color: #e8f4ed;
       }
       .wrap {
-        max-width: 900px;
+        max-width: 920px;
         margin: 40px auto;
-        padding: 0 20px 40px;
+        padding: 0 20px 48px;
       }
       .card {
-        background: rgba(10, 16, 12, 0.92);
-        border: 1px solid rgba(66, 190, 120, 0.2);
+        background: rgba(10, 15, 12, 0.94);
+        border: 1px solid rgba(72, 188, 122, 0.16);
         border-radius: 18px;
-        box-shadow: 0 18px 40px rgba(2, 10, 6, 0.6);
-        padding: 24px;
+        box-shadow: 0 18px 44px rgba(0, 0, 0, 0.42);
+        padding: 26px;
       }
       h1, h2, h3 {
         margin: 0 0 12px;
+        line-height: 1.2;
       }
       h1 {
-        font-size: 26px;
+        font-size: 28px;
       }
       h2 {
         font-size: 20px;
-        margin-top: 20px;
+        margin-top: 22px;
       }
       p, li {
-        color: rgba(200, 255, 220, 0.85);
+        color: rgba(225, 241, 232, 0.86);
         line-height: 1.7;
       }
-      a {
-        color: #19f18a;
-        text-decoration: none;
-        border-bottom: 1px solid rgba(25, 241, 138, 0.3);
-      }
-      a:hover {
-        border-color: #19f18a;
-      }
-      .muted {
-        color: rgba(180, 235, 210, 0.7);
-        font-size: 14px;
-      }
-      .list {
+      ul {
+        margin: 0;
         padding-left: 18px;
       }
-      .footer {
-        margin-top: 12px;
+      a {
+        color: #5ee49b;
+        text-decoration: none;
+        border-bottom: 1px solid rgba(94, 228, 155, 0.28);
+      }
+      a:hover {
+        border-color: rgba(94, 228, 155, 0.7);
+      }
+      .muted {
+        color: rgba(188, 215, 198, 0.68);
+        font-size: 14px;
+      }
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 14px;
+      }
+      .chip {
+        border-radius: 999px;
+        padding: 7px 11px;
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        color: rgba(232, 244, 237, 0.88);
         font-size: 13px;
-        color: rgba(185, 230, 208, 0.7);
+      }
+      .grid {
+        display: grid;
+        gap: 14px;
+        margin-top: 14px;
+      }
+      .note {
+        margin-top: 16px;
+        padding: 12px 14px;
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+      }
+      .footer {
+        margin-top: 20px;
+        font-size: 13px;
+        color: rgba(188, 215, 198, 0.68);
+      }
+      @media (max-width: 720px) {
+        .wrap {
+          margin: 20px auto;
+          padding: 0 14px 32px;
+        }
+        .card {
+          padding: 20px;
+        }
+        h1 {
+          font-size: 24px;
+        }
       }
     </style>
   </head>
   <body>
     <div class="wrap">
       <div class="card">
-        <h1>Abstract Messenger — Documentation</h1>
-        <p class="muted">Address-based messaging with client-side encrypted payloads on AbstractChain.</p>
+        <h1>AbsChat Docs</h1>
+        <p class="muted">
+          Wallet-based messaging on Abstract with onchain delivery, indexed history,
+          regular chats, and shared-password secret chats.
+        </p>
 
         <h2>Overview</h2>
         <p>
-          Abstract Messenger enables address-based chats. Messages are transmitted as on-chain
-          transactions on AbstractChain, and mirrored to an indexed datastore for fast retrieval
-          and cross-device availability. The app now uses a backend-gated data flow for regular
-          chats and profile data: frontend requests are authenticated and routed through backend API
-          before data is read or written in Supabase.
+          AbsChat is a messenger for AGW users on Abstract. Messages are sent as
+          zero-value transactions with calldata, then mirrored into indexed storage
+          so chats can load fast, sync across devices, and support modern UI features.
         </p>
 
-        <h2>Key Advantages over Web2</h2>
-        <ul class="list">
-          <li><strong>Anonymity:</strong> Chats are address-based; no email/phone/SSO.</li>
-          <li><strong>Ownership:</strong> Messages are tied to your wallet; no centralized accounts.</li>
-          <li><strong>E2EE for Secret chats:</strong> Shared-password encryption with AES‑GCM.</li>
-          <li><strong>Portability:</strong> History can be reconstructed from chain, independent of any single server.</li>
-          <li><strong>Transparency:</strong> Message metadata is verifiable; payloads remain unreadable to others.</li>
+        <div class="chips">
+          <span class="chip">AGW sign-in</span>
+          <span class="chip">Onchain messages</span>
+          <span class="chip">Secret chats</span>
+          <span class="chip">Reply</span>
+          <span class="chip">Pin</span>
+          <span class="chip">Reactions</span>
+          <span class="chip">Sessions</span>
+          <span class="chip">X Black theme</span>
+        </div>
+
+        <h2>Chat Modes</h2>
+        <ul>
+          <li>
+            <strong>Regular chats:</strong> encrypted payloads with backend-managed
+            conversation secrets for new chats. This mode is safer than the old legacy
+            scheme, but it is not E2EE.
+          </li>
+          <li>
+            <strong>Secret chats:</strong> shared-password E2EE. Both sides must set
+            the same password to decrypt messages.
+          </li>
+          <li>
+            <strong>Legacy compatibility:</strong> older regular chats can still be
+            read through the legacy fallback so existing history keeps working.
+          </li>
         </ul>
 
-        <h2>How Encryption Works</h2>
+        <h2>What Syncs</h2>
+        <ul>
+          <li>Message history and previews</li>
+          <li>Display names and avatars</li>
+          <li>Online status, typing, and seen state</li>
+          <li>Emoji reactions across devices and participants</li>
+          <li>Local pins across the same account's devices</li>
+          <li>Shared pins across both chat participants</li>
+          <li>Secret-chat visibility across the same account's devices</li>
+        </ul>
+
+        <h2>Current Feature Set</h2>
+        <div class="grid">
+          <div>
+            <h3>Messaging</h3>
+            <ul>
+              <li>Regular and secret chats</li>
+              <li>Reply to messages</li>
+              <li>Clickable links inside messages</li>
+              <li>Failed-message cleanup for unsent local messages</li>
+            </ul>
+          </div>
+          <div>
+            <h3>Conversation tools</h3>
+            <ul>
+              <li>Pin for yourself or for everyone in the chat</li>
+              <li>Emoji reactions synced in realtime</li>
+              <li>Message jump from reply or pinned preview</li>
+            </ul>
+          </div>
+          <div>
+            <h3>Profiles and list UX</h3>
+            <ul>
+              <li>Avatar + username profile card</li>
+              <li>Relative time and latest-message preview in chat list</li>
+              <li>Unread dot for new activity</li>
+            </ul>
+          </div>
+          <div>
+            <h3>Mobile UX</h3>
+            <ul>
+              <li>Swipe actions on chat cards</li>
+              <li>Long-press context menu for message actions</li>
+              <li>Compact pinned-message layout in the header</li>
+            </ul>
+          </div>
+          <div>
+            <h3>Settings</h3>
+            <ul>
+              <li>Wallet status</li>
+              <li>Language switcher</li>
+              <li>Theme switcher: AbsChat / X Black</li>
+              <li>Create or revoke local sending session</li>
+            </ul>
+          </div>
+        </div>
+
+        <h2>Delivery and Recovery</h2>
+        <ul>
+          <li>
+            Realtime broadcast handles typing, reactions, pins, read state, and visibility.
+          </li>
+          <li>
+            Indexed history from Supabase keeps chat loading fast on refresh and across devices.
+          </li>
+          <li>
+            Periodic polling and a light chain scanner help recover when realtime misses events.
+          </li>
+        </ul>
+
+        <h2>Security Model</h2>
+        <ul>
+          <li>
+            Frontend signs a wallet message to obtain a short-lived backend JWT.
+          </li>
+          <li>
+            Indexed reads and writes go through backend API routes.
+          </li>
+          <li>
+            Supabase service-role credentials stay on the backend only.
+          </li>
+          <li>
+            Regular chats are server-trust encryption, not E2EE.
+          </li>
+          <li>
+            Secret chat passwords are stored only on the local device and never synced.
+          </li>
+        </ul>
+
+        <div class="note">
+          <strong>Important:</strong> secret chats are the private mode. Regular chats
+          are the default cloud-style mode and should not be described as E2EE.
+        </div>
+
+        <h2>Sessions</h2>
         <p>
-          There are two modes:
-        </p>
-        <ul class="list">
-          <li><strong>Regular chats:</strong> A deterministic key is derived from the two addresses. This is not E2EE.</li>
-          <li><strong>Secret chats:</strong> Both sides set the same shared password.</li>
-          <li><strong>Key derivation:</strong> Password + per-conversation salt → key.</li>
-          <li><strong>Cipher:</strong> AES‑GCM (256‑bit), random IV per message.</li>
-          <li><strong>Storage:</strong> Passwords are stored only on the local device and never synced.</li>
-        </ul>
-
-        <h2>Realtime and Reliability</h2>
-        <ul class="list">
-          <li>Realtime: Broadcast channels sync online, typing, read receipts, and visibility across devices.</li>
-          <li>Fallback: Periodic polling and chain scanning ensure delivery when realtime is unavailable.</li>
-          <li>Recovery: A light chain scanner can reconstruct missing messages from on-chain data.</li>
-        </ul>
-
-        <h2>Backend Security Model</h2>
-        <ul class="list">
-          <li>Data path: Frontend → Backend API → Supabase.</li>
-          <li>Auth: Wallet signature is exchanged for a short-lived JWT used by backend endpoints.</li>
-          <li>Secrets: Service Role key is stored only on backend and never exposed to browser code.</li>
-          <li>Authorization: Backend validates requester identity before profile/message operations.</li>
-          <li>Client access: Browser uses anon credentials only for realtime signaling.</li>
-        </ul>
-
-        <h2>Profiles and Identity</h2>
-        <ul class="list">
-          <li>Users set their own display name and avatar directly in the app.</li>
-          <li>Usernames must contain at least 3 characters.</li>
-          <li>Usernames are unique: one name cannot be assigned to multiple addresses.</li>
-          <li>Profile updates are stored and synced across devices via the indexed datastore.</li>
-          <li>When no profile is set, the UI falls back to a shortened address.</li>
-        </ul>
-
-        <h2>Presence and Read Status</h2>
-        <ul class="list">
-          <li>Online status reflects when the other participant has your chat open.</li>
-          <li>Typing indicators appear in real time while the other user is composing.</li>
-          <li>Read receipts show when the latest outgoing message has been seen.</li>
-        </ul>
-
-        <h2>Session Sending</h2>
-        <p>
-          Session sending allows pre-authorized message transmissions without per-message wallet prompts.
-          Implementation typically relies on smart wallet session keys or permissioned delegates. This UI
-          includes a “Create Session” control and persistence, ready to be wired to wallet APIs that support sessions.
+          AbsChat can create a local sending session so you do not need a wallet
+          confirmation for every single message. Session data lives on the current
+          device and can be revoked from settings.
         </p>
 
-        <h2>Interface</h2>
-        <ul class="list">
-          <li>Soft-surface cards with reduced borders and deeper shadows.</li>
-          <li>Modernized search and composer inputs with rounded geometry.</li>
-          <li>Larger avatars and clearer chat list hierarchy.</li>
-          <li>Mobile-friendly layout with stacked panels and touch-ready controls.</li>
-        </ul>
-
-        <h2>Recent Updates</h2>
-        <ul class="list">
-          <li>Refined dark theme with radial background depth and calmer accent usage.</li>
-          <li>Secret chats with a lock indicator in the chat list and header.</li>
-          <li>Password-based E2EE flows, plus instant blur on invalid/cleared passwords.</li>
-          <li>Secret chat visibility sync across devices for the same account.</li>
-          <li>Input polish: updated search field, composer focus styling, and scrollbar cleanup.</li>
-          <li>Multi-device sync diagnostics: detailed timing logs for realtime, polling, and chain recovery.</li>
-        </ul>
-
-        <h2>Security Notes</h2>
-        <ul class="list">
-          <li>Secret chat passwords are stored locally per device; clearing storage can make old messages unreadable.</li>
-          <li>Regular chats are not E2EE; they use deterministic encryption derived from addresses.</li>
-          <li>A compromised device can expose locally cached messages and encryption keys.</li>
-          <li>Addresses and timestamps are public on-chain; metadata is always visible.</li>
-          <li>Supabase service role remains backend-only; frontend does not receive privileged keys.</li>
-          <li>Backend-enforced checks reduce direct unauthorized data access through client APIs.</li>
-          <li>Consider using fresh addresses for stronger unlinkability.</li>
+        <h2>What Stays Public</h2>
+        <ul>
+          <li>Wallet activity and tx hashes on Abstract</li>
+          <li>Onchain timestamps</li>
+          <li>Ciphertext payloads written into transaction calldata</li>
         </ul>
 
         <h2>Getting Started</h2>
-        <ul class="list">
+        <ul>
           <li>Connect AGW.</li>
-          <li>Enter a peer address to start a conversation.</li>
-          <li>Write a message and sign the transaction.</li>
+          <li>Open or create a chat with another address.</li>
+          <li>Send a message, or create a session for faster sending.</li>
+          <li>Use a secret chat when you want shared-password E2EE.</li>
         </ul>
 
         <div class="footer">
-          Built on AbstractChain. Follow <a href="https://x.com/arsii_eth" target="_blank" rel="noopener">arsii_eth</a>.
+          Built for Abstract. Follow
+          <a href="https://x.com/arsii_eth" target="_blank" rel="noopener">arsii_eth</a>.
         </div>
       </div>
     </div>
