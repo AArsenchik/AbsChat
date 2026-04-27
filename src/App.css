@@ -1789,7 +1789,7 @@ html, body {
 
 .chat__typing {
   font-size: 11px;
-  color: var(--text-muted);
+  color: #1d9bf0;
   line-height: 1.2;
   white-space: nowrap;
   overflow: hidden;
@@ -2515,11 +2515,11 @@ html, body {
 .group-create__hero {
   display: flex;
   align-items: center;
-  gap: 22px;
-  min-height: 132px;
-  border-radius: 28px;
+  gap: 14px;
+  min-height: 96px;
+  border-radius: 20px;
   background: color-mix(in srgb, var(--surface) 88%, white 3%);
-  padding: 22px 24px;
+  padding: 14px 16px;
 }
 
 .group-create__hero-avatar {
@@ -2550,8 +2550,8 @@ html, body {
 }
 
 .group-create__avatar-btn {
-  width: 108px;
-  height: 108px;
+  width: 72px;
+  height: 72px;
   border-radius: 999px;
   border: none;
   background: color-mix(in srgb, var(--accent) 14%, var(--surface-strong) 86%);
@@ -2583,8 +2583,8 @@ html, body {
 }
 
 .group-create__avatar-fallback svg {
-  width: 44px;
-  height: 44px;
+  width: 30px;
+  height: 30px;
 }
 
 .group-create__avatar-clear {
@@ -2625,7 +2625,7 @@ html, body {
   background: transparent;
   padding: 0;
   border-radius: 0;
-  font-size: 28px;
+  font-size: 20px;
   line-height: 1.15;
   font-weight: 500;
   box-shadow: none;
@@ -2756,45 +2756,45 @@ html, body {
   }
 
   .group-create__hero {
-    gap: 18px;
-    min-height: 116px;
-    padding: 18px 20px;
+    gap: 12px;
+    min-height: 90px;
+    padding: 12px 14px;
   }
 
   .group-create__avatar-btn {
-    width: 88px;
-    height: 88px;
+    width: 64px;
+    height: 64px;
   }
 
   .group-create__avatar-fallback svg {
-    width: 36px;
-    height: 36px;
+    width: 26px;
+    height: 26px;
   }
 
   .group-create__hero-input {
-    font-size: 22px;
+    font-size: 18px;
   }
 }
 
 @media (max-width: 520px) {
   .group-create__hero {
-    gap: 14px;
-    padding: 16px 18px;
-    min-height: 100px;
+    gap: 10px;
+    padding: 10px 12px;
+    min-height: 82px;
   }
 
   .group-create__avatar-btn {
-    width: 76px;
-    height: 76px;
+    width: 56px;
+    height: 56px;
   }
 
   .group-create__avatar-fallback svg {
-    width: 30px;
-    height: 30px;
+    width: 22px;
+    height: 22px;
   }
 
   .group-create__hero-input {
-    font-size: 18px;
+    font-size: 16px;
   }
 }
 

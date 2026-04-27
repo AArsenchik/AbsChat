@@ -1599,6 +1599,7 @@ function App() {
   const [secretInfoOpen, setSecretInfoOpen] = useState(false)
   const groupCreateAvatarInputRef = useRef<HTMLInputElement | null>(null)
   const groupProfileAvatarInputRef = useRef<HTMLInputElement | null>(null)
+  const groupDetailsWarmupRef = useRef<Record<string, boolean>>({})
   const backendAuthInFlightRef = useRef(false)
   const [backendAuthed, setBackendAuthed] = useState(false)
   const avatarPickerOptions = useMemo<NftAvatarOption[]>(() => {
@@ -2738,10 +2739,11 @@ function App() {
   }, [backendAuthed, address, apiFetch])
 
   const loadGroupDetails = useCallback(
-    async (groupId: string) => {
+    async (groupId: string, options?: { applyToProfile?: boolean }) => {
       if (!backendAuthed || !address) return null
       const normalizedGroupId = normalizeGroupId(groupId)
       if (!normalizedGroupId) return null
+      const applyToProfile = options?.applyToProfile ?? true
       const response = await apiFetch(
         `/groups?id=${encodeURIComponent(normalizedGroupId)}`,
       )
@@ -2800,9 +2802,11 @@ function App() {
           member_count: details.member_count,
         },
       }))
-      setGroupProfileDetails(details)
-      setGroupProfileNameDraft(details.name)
-      setGroupProfileAvatarDraft(details.avatar_url ?? null)
+      if (applyToProfile) {
+        setGroupProfileDetails(details)
+        setGroupProfileNameDraft(details.name)
+        setGroupProfileAvatarDraft(details.avatar_url ?? null)
+      }
       if (details.members.length > 0) {
         void loadProfiles(details.members.map((member) => member.address))
       }
@@ -2810,6 +2814,31 @@ function App() {
     },
     [backendAuthed, address, apiFetch, loadProfiles],
   )
+
+  useEffect(() => {
+    if (!backendAuthed || !address) return
+    const groupIds = Object.keys(groupsById)
+    if (groupIds.length === 0) return
+    let cancelled = false
+    const warmGroupMembers = async () => {
+      for (const groupId of groupIds) {
+        if (cancelled) return
+        const cached = groupDetailsById[groupId]
+        if (cached && cached.members.length > 0) continue
+        if (groupDetailsWarmupRef.current[groupId]) continue
+        groupDetailsWarmupRef.current[groupId] = true
+        try {
+          await loadGroupDetails(groupId, { applyToProfile: false })
+        } catch {
+          delete groupDetailsWarmupRef.current[groupId]
+        }
+      }
+    }
+    void warmGroupMembers()
+    return () => {
+      cancelled = true
+    }
+  }, [backendAuthed, address, groupsById, groupDetailsById, loadGroupDetails])
 
   const formatGroupCreateError = useCallback((error: unknown) => {
     const message = getErrorMessage(error)
