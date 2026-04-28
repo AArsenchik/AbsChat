@@ -29,7 +29,7 @@ export default async function handler(req, res) {
     }
     const { data, error } = await supabase
       .from('profiles')
-      .select('address, display_name, avatar_url')
+      .select('address, display_name, avatar_url, bio')
       .in('address', addresses)
     if (error) {
       json(res, 500, { error: error.message })
@@ -49,6 +49,8 @@ export default async function handler(req, res) {
     const displayNameRaw =
       typeof payload.display_name === 'string' ? payload.display_name.trim() : ''
     const displayName = displayNameRaw ? displayNameRaw : null
+    const bioRaw = typeof payload.bio === 'string' ? payload.bio.trim() : ''
+    const bio = bioRaw ? bioRaw.slice(0, 67) : null
     if (displayName && displayName.length < 3) {
       json(res, 400, { error: 'Username must be at least 3 characters' })
       return
@@ -73,6 +75,7 @@ export default async function handler(req, res) {
       address,
       display_name: displayName,
       avatar_url: typeof payload.avatar_url === 'string' ? payload.avatar_url : null,
+      bio,
       updated_at:
         typeof payload.updated_at === 'string'
           ? payload.updated_at
@@ -81,7 +84,7 @@ export default async function handler(req, res) {
     const { data, error } = await supabase
       .from('profiles')
       .upsert([upsertPayload], { onConflict: 'address' })
-      .select('address, display_name, avatar_url')
+      .select('address, display_name, avatar_url, bio')
     if (error) {
       json(res, 500, { error: error.message })
       return

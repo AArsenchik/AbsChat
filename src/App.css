@@ -317,6 +317,35 @@ html, body {
   word-break: break-all;
 }
 
+.profile__name-display {
+  font-size: 42px;
+  line-height: 1.1;
+  font-weight: 700;
+  color: var(--text);
+  text-align: center;
+  align-self: center;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profile__name-input {
+  width: 100%;
+  text-align: center;
+  font-size: 42px;
+  line-height: 1.1;
+  font-weight: 700;
+  border: none;
+  background: color-mix(in srgb, var(--surface) 90%, white 3%);
+  border-radius: 16px;
+  padding: 16px 20px;
+}
+
+.profile__name-input::placeholder {
+  color: rgba(231, 233, 234, 0.28);
+}
+
 .profile__meta {
   display: flex;
   flex-direction: column;
@@ -386,6 +415,10 @@ html, body {
 
 .profile__avatar-button {
   align-self: center;
+  cursor: default;
+}
+
+.profile__avatar-button--editable {
   cursor: pointer;
 }
 
@@ -405,8 +438,8 @@ html, body {
   pointer-events: none;
 }
 
-.profile__avatar-button:hover .profile__avatar-edit,
-.profile__avatar-button:focus-visible .profile__avatar-edit {
+.profile__avatar-button--editable:hover .profile__avatar-edit,
+.profile__avatar-button--editable:focus-visible .profile__avatar-edit {
   opacity: 1;
 }
 
@@ -2765,6 +2798,11 @@ html, body {
 }
 
 @media (max-width: 720px) {
+  .profile__name-display,
+  .profile__name-input {
+    font-size: 34px;
+  }
+
   .modal__content--group-create {
     max-width: 560px;
   }
@@ -2791,6 +2829,11 @@ html, body {
 }
 
 @media (max-width: 520px) {
+  .profile__name-display,
+  .profile__name-input {
+    font-size: 28px;
+  }
+
   .group-create__hero {
     gap: 10px;
     padding: 10px 12px;

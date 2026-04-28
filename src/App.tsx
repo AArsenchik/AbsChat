@@ -7034,6 +7034,10 @@ function App() {
     if (addressLower) {
       setProfileNameDraft(displayNames[addressLower] ?? '')
       setProfileBioDraft(customBios[addressLower] ?? '')
+      void loadProfiles([addressLower]).then(() => {
+        setProfileNameDraft(customNamesRef.current[addressLower] ?? '')
+        setProfileBioDraft(customBiosRef.current[addressLower] ?? '')
+      })
       if (!displayNames[addressLower]) {
         const fallbackAddresses =
           signerAddressLower && signerAddressLower !== addressLower
@@ -8756,7 +8760,7 @@ function App() {
             <div className="profile">
               <button
                 className={`profile__avatar profile__avatar-button ${
-                  address && profileEditing ? 'profile__avatar--editable' : ''
+                  address && profileEditing ? 'profile__avatar-button--editable' : ''
                 }`}
                 onClick={handleOpenNftPicker}
                 disabled={!address || profileSaving || !profileEditing}
@@ -8770,7 +8774,7 @@ function App() {
                   showTooltip={false}
                   src={addressLower ? customAvatars[addressLower] ?? undefined : undefined}
                 />
-                {address && (
+                {address && profileEditing && (
                   <span className="profile__avatar-edit" aria-hidden="true">
                     <svg viewBox="0 0 24 24" className="profile__avatar-edit-icon">
                       <path
@@ -8791,9 +8795,18 @@ function App() {
                   </span>
                 )}
               </button>
-              <div className="profile__row">
-                <div className="profile__address">{profileLabel}</div>
-              </div>
+              {profileEditing ? (
+                <input
+                  className="input profile__name-input"
+                  placeholder={t.profileNamePlaceholder}
+                  value={profileNameDraft}
+                  onChange={(event) => setProfileNameDraft(event.target.value)}
+                  maxLength={64}
+                  disabled={profileSaving}
+                />
+              ) : (
+                <div className="profile__name-display">{profileLabel}</div>
+              )}
               <div className="profile__meta">
                 <div className="profile__meta-label">{t.walletPrefix.slice(0, -1)}</div>
                 <div className="profile__meta-value">
@@ -8802,12 +8815,6 @@ function App() {
               </div>
               {profileEditing && (
                 <div className="profile__edit">
-                  <input
-                    className="input profile__input"
-                    placeholder={t.profileNamePlaceholder}
-                    value={profileNameDraft}
-                    onChange={(event) => setProfileNameDraft(event.target.value)}
-                  />
                   <textarea
                     className="input profile__input profile__textarea"
                     placeholder={t.profileBioPlaceholder}
