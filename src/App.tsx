@@ -2940,7 +2940,7 @@ function App() {
     }
   }, [backendAuthed, address, loadGroups])
 
-  useEffect(() => {
+  const profileSyncAddresses = useMemo(() => {
     const targets = new Set<string>()
     const activePeerLowerValue = activePeer.toLowerCase()
     if (address) targets.add(address.toLowerCase())
@@ -2965,8 +2965,7 @@ function App() {
         })
       }
     }
-    const list = Array.from(targets).filter((item) => isAddress(item))
-    void loadProfiles(list)
+    return Array.from(targets).filter((item) => isAddress(item))
   }, [
     peers,
     activePeer,
@@ -2976,8 +2975,37 @@ function App() {
     messages,
     groupProfileDetails,
     address,
-    loadProfiles,
   ])
+
+  useEffect(() => {
+    if (profileSyncAddresses.length === 0) return
+    void loadProfiles(profileSyncAddresses)
+  }, [profileSyncAddresses, loadProfiles])
+
+  useEffect(() => {
+    if (!backendAuthed || profileSyncAddresses.length === 0) return
+    const refresh = () => {
+      void loadProfiles(profileSyncAddresses, { force: true })
+    }
+    const onFocus = () => refresh()
+    const onOnline = () => refresh()
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') refresh()
+    }
+
+    window.addEventListener('focus', onFocus)
+    window.addEventListener('online', onOnline)
+    document.addEventListener('visibilitychange', onVisibility)
+
+    const interval = window.setInterval(refresh, 45000)
+
+    return () => {
+      window.removeEventListener('focus', onFocus)
+      window.removeEventListener('online', onOnline)
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.clearInterval(interval)
+    }
+  }, [backendAuthed, profileSyncAddresses, loadProfiles])
 
   const unreadCountsByThread = useMemo(() => {
     if (!address) return {}
