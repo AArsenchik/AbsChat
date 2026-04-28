@@ -2600,7 +2600,7 @@ function App() {
 
   const loadProfiles = useCallback(
     async (addresses: string[], options?: { force?: boolean }) => {
-      if (!backendAuthed || addresses.length === 0) return
+      if (!address || addresses.length === 0) return
       const now = Date.now()
       const force = options?.force === true
       const cachedNameUpdates: Record<string, string | null> = {}
@@ -2682,7 +2682,7 @@ function App() {
         setCustomBios((prev) => ({ ...prev, ...bioUpdates }))
       }
     },
-    [setCustomNames, setCustomAvatars, setCustomBios, backendAuthed, apiFetch],
+    [setCustomNames, setCustomAvatars, setCustomBios, address, apiFetch],
   )
 
   const saveProfile = useCallback(
@@ -2983,21 +2983,24 @@ function App() {
   }, [profileSyncAddresses, loadProfiles])
 
   useEffect(() => {
-    if (!backendAuthed || profileSyncAddresses.length === 0) return
-    const refresh = () => {
+    if (!connected || profileSyncAddresses.length === 0) return
+    const refresh = async () => {
+      await ensureBackendAuth()
       void loadProfiles(profileSyncAddresses, { force: true })
     }
-    const onFocus = () => refresh()
-    const onOnline = () => refresh()
+    const onFocus = () => void refresh()
+    const onOnline = () => void refresh()
     const onVisibility = () => {
-      if (document.visibilityState === 'visible') refresh()
+      if (document.visibilityState === 'visible') void refresh()
     }
 
     window.addEventListener('focus', onFocus)
     window.addEventListener('online', onOnline)
     document.addEventListener('visibilitychange', onVisibility)
 
-    const interval = window.setInterval(refresh, 45000)
+    const interval = window.setInterval(() => {
+      void refresh()
+    }, 45000)
 
     return () => {
       window.removeEventListener('focus', onFocus)
@@ -3005,7 +3008,7 @@ function App() {
       document.removeEventListener('visibilitychange', onVisibility)
       window.clearInterval(interval)
     }
-  }, [backendAuthed, profileSyncAddresses, loadProfiles])
+  }, [connected, profileSyncAddresses, loadProfiles, ensureBackendAuth])
 
   const unreadCountsByThread = useMemo(() => {
     if (!address) return {}
