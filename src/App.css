@@ -507,6 +507,19 @@ html, body {
   white-space: nowrap;
 }
 
+.peer-profile__bio {
+  width: 100%;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--text);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .peer-profile__address {
   width: 100%;
   font-size: 13px;

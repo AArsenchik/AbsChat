@@ -82,6 +82,7 @@ type SupabaseProfile = {
   address: string
   display_name: string | null
   avatar_url: string | null
+  bio?: string | null
   e2ee_public_key?: string | null
   e2ee_backup?: string | null
   e2ee_backup_iv?: string | null
@@ -165,6 +166,8 @@ const dict = {
     profile: 'Profile',
     profileTitle: 'Profile',
     profileNamePlaceholder: 'Username',
+    profileBioPlaceholder: 'Bio',
+    profileBioLimit: 'Up to 67 characters',
     profileCancel: 'Cancel',
     walletStatusLabel: 'Wallet',
     language: 'Language',
@@ -258,6 +261,8 @@ const dict = {
     profile: '个人资料',
     profileTitle: '个人资料',
     profileNamePlaceholder: '用户名',
+    profileBioPlaceholder: 'Bio',
+    profileBioLimit: 'Up to 67 characters',
     profileCancel: '取消',
     walletStatusLabel: '钱包',
     language: '语言',
@@ -351,6 +356,8 @@ const dict = {
     profile: '프로필',
     profileTitle: '프로필',
     profileNamePlaceholder: '사용자 이름',
+    profileBioPlaceholder: 'Bio',
+    profileBioLimit: 'Up to 67 characters',
     profileCancel: '취소',
     walletStatusLabel: '지갑',
     language: '언어',
@@ -444,6 +451,8 @@ const dict = {
     profile: 'プロフィール',
     profileTitle: 'プロフィール',
     profileNamePlaceholder: 'ユーザー名',
+    profileBioPlaceholder: 'Bio',
+    profileBioLimit: 'Up to 67 characters',
     profileCancel: 'キャンセル',
     walletStatusLabel: 'ウォレット',
     language: '言語',
@@ -1568,6 +1577,7 @@ function App() {
   const [profileNames, setProfileNames] = useState<Record<string, string | null>>({})
   const [customNames, setCustomNames] = useState<Record<string, string | null>>({})
   const [customAvatars, setCustomAvatars] = useState<Record<string, string | null>>({})
+  const [customBios, setCustomBios] = useState<Record<string, string | null>>({})
   const [groupsById, setGroupsById] = useState<Record<string, GroupMeta>>({})
   const groupsByIdRef = useRef<Record<string, GroupMeta>>({})
   const [conversationKey, setConversationKey] = useState<CryptoKey | null>(null)
@@ -1594,7 +1604,7 @@ function App() {
   const pollActiveMessagesInFlightRef = useRef(false)
   const pollIncomingInFlightRef = useRef(false)
   const profileCacheRef = useRef<
-    Record<string, { displayName: string | null; avatarUrl: string | null; ts: number }>
+    Record<string, { displayName: string | null; avatarUrl: string | null; bio: string | null; ts: number }>
   >({})
   const signalsChannelRef = useRef<
     ReturnType<NonNullable<typeof supabase>['channel']> | null
@@ -1610,6 +1620,7 @@ function App() {
   const secretVisibilityUpdatedAtRef = useRef<Record<string, string>>({})
   const customNamesRef = useRef<Record<string, string | null>>({})
   const customAvatarsRef = useRef<Record<string, string | null>>({})
+  const customBiosRef = useRef<Record<string, string | null>>({})
   const oldestMessageByPeerRef = useRef<Record<string, string>>({})
   const newestMessageByPeerRef = useRef<Record<string, string>>({})
   const olderMessagesLoadingRef = useRef<Record<string, boolean>>({})
@@ -1619,6 +1630,7 @@ function App() {
   const [profileEditing, setProfileEditing] = useState(false)
   const [profileSaving, setProfileSaving] = useState(false)
   const [profileNameDraft, setProfileNameDraft] = useState('')
+  const [profileBioDraft, setProfileBioDraft] = useState('')
   const [profileError, setProfileError] = useState<string | null>(null)
   const [nftPickerOpen, setNftPickerOpen] = useState(false)
   const [nftAvatarOptions, setNftAvatarOptions] = useState<NftAvatarOption[]>([])
@@ -2130,6 +2142,10 @@ function App() {
   }, [customAvatars])
 
   useEffect(() => {
+    customBiosRef.current = customBios
+  }, [customBios])
+
+  useEffect(() => {
     groupsByIdRef.current = groupsById
   }, [groupsById])
 
@@ -2588,6 +2604,7 @@ function App() {
       const now = Date.now()
       const cachedNameUpdates: Record<string, string | null> = {}
       const cachedAvatarUpdates: Record<string, string | null> = {}
+      const cachedBioUpdates: Record<string, string | null> = {}
       const toFetch: string[] = []
       addresses.forEach((address) => {
         const key = address.toLowerCase()
@@ -2597,6 +2614,7 @@ function App() {
           if (isFresh) {
             cachedNameUpdates[key] = cached.displayName ?? null
             cachedAvatarUpdates[key] = cached.avatarUrl ?? null
+            cachedBioUpdates[key] = cached.bio ?? null
             return
           }
         }
@@ -2607,6 +2625,9 @@ function App() {
       }
       if (Object.keys(cachedAvatarUpdates).length > 0) {
         setCustomAvatars((prev) => ({ ...prev, ...cachedAvatarUpdates }))
+      }
+      if (Object.keys(cachedBioUpdates).length > 0) {
+        setCustomBios((prev) => ({ ...prev, ...cachedBioUpdates }))
       }
       if (toFetch.length === 0) return
       let data: SupabaseProfile[] = []
@@ -2621,6 +2642,7 @@ function App() {
       }
       const nameUpdates: Record<string, string | null> = {}
       const avatarUpdates: Record<string, string | null> = {}
+      const bioUpdates: Record<string, string | null> = {}
       const received = new Set<string>()
       data.forEach((item: SupabaseProfile) => {
         if (!item?.address) return
@@ -2628,9 +2650,11 @@ function App() {
         received.add(key)
         nameUpdates[key] = item.display_name ?? null
         avatarUpdates[key] = item.avatar_url ?? null
+        bioUpdates[key] = item.bio ?? null
         profileCacheRef.current[key] = {
           displayName: item.display_name ?? null,
           avatarUrl: item.avatar_url ?? null,
+          bio: item.bio ?? null,
           ts: now,
         }
       })
@@ -2639,6 +2663,7 @@ function App() {
         profileCacheRef.current[key] = {
           displayName: null,
           avatarUrl: null,
+          bio: null,
           ts: now,
         }
       })
@@ -2648,8 +2673,11 @@ function App() {
       if (Object.keys(avatarUpdates).length > 0) {
         setCustomAvatars((prev) => ({ ...prev, ...avatarUpdates }))
       }
+      if (Object.keys(bioUpdates).length > 0) {
+        setCustomBios((prev) => ({ ...prev, ...bioUpdates }))
+      }
     },
-    [setCustomNames, setCustomAvatars, backendAuthed, apiFetch],
+    [setCustomNames, setCustomAvatars, setCustomBios, backendAuthed, apiFetch],
   )
 
   const saveProfile = useCallback(
@@ -2657,6 +2685,7 @@ function App() {
       address: string
       display_name: string | null
       avatar_url: string | null
+      bio: string | null
       updated_at: string
     }) => {
       const withTimeout = async <T,>(promise: Promise<T>, ms: number) => {
@@ -3058,6 +3087,7 @@ function App() {
       setProfileNames({})
       setCustomNames({})
       setCustomAvatars({})
+      setCustomBios({})
       setGroupsById({})
       setGroupDetailsById({})
       setSecretPassphrases({})
@@ -3090,6 +3120,7 @@ function App() {
         setProfileNames({})
         setCustomNames({})
         setCustomAvatars({})
+        setCustomBios({})
         setGroupsById({})
         setGroupDetailsById({})
         setHiddenPeers([])
@@ -3118,6 +3149,7 @@ function App() {
         profileNames?: Record<string, string | null>
         customNames?: Record<string, string | null>
         customAvatars?: Record<string, string | null>
+        customBios?: Record<string, string | null>
         groupsById?: Record<string, GroupMeta>
         hiddenPeers?: string[]
         peerVisibilityUpdatedAt?: Record<string, string>
@@ -3148,6 +3180,7 @@ function App() {
       setProfileNames(parsed.profileNames ?? {})
       setCustomNames(parsed.customNames ?? {})
       setCustomAvatars(parsed.customAvatars ?? {})
+      setCustomBios(parsed.customBios ?? {})
       const storedGroups = parsed.groupsById ?? {}
       const normalizedGroups = Object.fromEntries(
         Object.entries(storedGroups).flatMap(([groupKey, group]) => {
@@ -3219,6 +3252,7 @@ function App() {
       setProfileNames({})
       setCustomNames({})
       setCustomAvatars({})
+      setCustomBios({})
       setGroupsById({})
       setGroupDetailsById({})
       setHiddenPeers([])
@@ -3607,6 +3641,7 @@ function App() {
       profileNames,
       customNames,
       customAvatars,
+      customBios,
       groupsById,
       hiddenPeers,
       peerVisibilityUpdatedAt,
@@ -3630,6 +3665,7 @@ function App() {
     profileNames,
     customNames,
     customAvatars,
+    customBios,
     groupsById,
     hiddenPeers,
     peerVisibilityUpdatedAt,
@@ -4662,6 +4698,7 @@ function App() {
           to?: string
           displayName?: string | null
           avatarUrl?: string | null
+          bio?: string | null
         }
         if (!data?.from || !data?.to) return
         if (data.to.toLowerCase() !== addressLower) return
@@ -4671,6 +4708,9 @@ function App() {
         }
         if (data.avatarUrl !== undefined) {
           setCustomAvatars((prev) => ({ ...prev, [key]: data.avatarUrl ?? null }))
+        }
+        if (data.bio !== undefined) {
+          setCustomBios((prev) => ({ ...prev, [key]: data.bio ?? null }))
         }
       })
       .on('broadcast', { event: 'peer_visibility' }, (payload: { payload: unknown }) => {
@@ -4763,7 +4803,7 @@ function App() {
   }
 
   const emitProfileSync = useCallback(
-    (displayName: string | null, avatarUrl: string | null) => {
+    (displayName: string | null, avatarUrl: string | null, bio: string | null) => {
       if (!signalsChannelRef.current || !address) return
       const addressLower = address.toLowerCase()
       void signalsChannelRef.current.send({
@@ -4774,6 +4814,7 @@ function App() {
           to: addressLower,
           displayName,
           avatarUrl,
+          bio,
         },
       })
     },
@@ -6861,6 +6902,9 @@ function App() {
   const peerProfileLabel = peerProfileAddressLower
     ? displayNames[peerProfileAddressLower] || shorten(peerProfileAddressLower)
     : '—'
+  const peerProfileBio = peerProfileAddressLower
+    ? customBios[peerProfileAddressLower] ?? null
+    : null
   const groupProfileId = normalizeGroupId(groupProfileDetails?.id)
   const groupProfileRole = String(groupProfileDetails?.role ?? '').toLowerCase()
   const groupProfileCanEdit = Boolean(
@@ -6880,7 +6924,8 @@ function App() {
     const peerLower = peer.toLowerCase()
     if (isGroupId(peerLower)) return
     setPeerProfileAddress(peerLower)
-  }, [])
+    void loadProfiles([peerLower])
+  }, [loadProfiles])
 
   const handleCreateSecretChatAction = useCallback(
     (peerLower: string) => {
@@ -6988,6 +7033,7 @@ function App() {
     setNftPickerOpen(false)
     if (addressLower) {
       setProfileNameDraft(displayNames[addressLower] ?? '')
+      setProfileBioDraft(customBios[addressLower] ?? '')
       if (!displayNames[addressLower]) {
         const fallbackAddresses =
           signerAddressLower && signerAddressLower !== addressLower
@@ -7007,16 +7053,7 @@ function App() {
       }
     } else {
       setProfileNameDraft('')
-    }
-  }
-
-  const handleProfileCancel = () => {
-    setProfileEditing(false)
-    setNftPickerOpen(false)
-    if (addressLower) {
-      setProfileNameDraft(displayNames[addressLower] ?? '')
-    } else {
-      setProfileNameDraft('')
+      setProfileBioDraft('')
     }
   }
 
@@ -7045,6 +7082,7 @@ function App() {
     if (!addressLower) return
     setProfileError(null)
     const nextName = profileNameDraft.trim()
+    const nextBio = profileBioDraft.trim().slice(0, 67)
     if (nextName && nextName.length < 3) {
       setProfileError('Username must contain at least 3 characters')
       return
@@ -7057,6 +7095,7 @@ function App() {
         address: addressLower,
         display_name: nextName || null,
         avatar_url: customAvatars[addressLower] ?? null,
+        bio: nextBio || null,
         updated_at: new Date().toISOString(),
       })
       if (row) {
@@ -7068,13 +7107,19 @@ function App() {
           ...prev,
           [addressLower]: row.avatar_url ?? null,
         }))
+        setCustomBios((prev) => ({
+          ...prev,
+          [addressLower]: row.bio ?? null,
+        }))
       } else {
         setCustomNames((prev) => ({ ...prev, [addressLower]: nextName || null }))
+        setCustomBios((prev) => ({ ...prev, [addressLower]: nextBio || null }))
         await loadProfiles([addressLower])
       }
       emitProfileSync(
         row?.display_name ?? (nextName || null),
         row ? row.avatar_url ?? null : customAvatars[addressLower] ?? null,
+        row ? row.bio ?? null : nextBio || null,
       )
       if (!nextName) {
         const fallbackAddresses =
@@ -7088,6 +7133,7 @@ function App() {
         ).catch(() => {})
       }
       setProfileNameDraft(nextName)
+      setProfileBioDraft(nextBio)
       setProfileEditing(false)
     } catch (err) {
       console.error('Profile save error:', err)
@@ -7107,10 +7153,21 @@ function App() {
     }
   }
 
+  const handleToggleProfileEditing = async () => {
+    if (!address) return
+    if (profileEditing) {
+      await handleProfileSave()
+      return
+    }
+    setProfileError(null)
+    setProfileEditing(true)
+  }
+
   const handleSelectNftAvatar = async (avatarUrl: string) => {
     if (!addressLower) return
     const previousAvatar = customAvatars[addressLower] ?? null
     const displayName = customNames[addressLower] ?? displayNames[addressLower] ?? null
+    const bio = customBios[addressLower] ?? null
     setProfileError(null)
     setNftPickerUseAgwAvatar(false)
     setNftPickerOpen(false)
@@ -7120,12 +7177,14 @@ function App() {
       profileCacheRef.current[addressLower] = {
         displayName,
         avatarUrl,
+        bio,
         ts: Date.now(),
       }
       const row = await saveProfile({
         address: addressLower,
         display_name: customNames[addressLower] ?? null,
         avatar_url: avatarUrl,
+        bio,
         updated_at: new Date().toISOString(),
       })
       if (row) {
@@ -7140,6 +7199,7 @@ function App() {
         profileCacheRef.current[addressLower] = {
           displayName: row.display_name ?? null,
           avatarUrl,
+          bio: row.bio ?? bio,
           ts: Date.now(),
         }
       } else {
@@ -7148,6 +7208,7 @@ function App() {
       emitProfileSync(
         row?.display_name ?? customNames[addressLower] ?? null,
         avatarUrl,
+        row?.bio ?? bio,
       )
     } catch (err) {
       console.error('NFT avatar save error:', err)
@@ -7156,6 +7217,7 @@ function App() {
         profileCacheRef.current[addressLower] = {
           displayName,
           avatarUrl: previousAvatar,
+          bio,
           ts: Date.now(),
         }
         setNftPickerOpen(true)
@@ -7173,6 +7235,7 @@ function App() {
 
     const previousAvatar = customAvatars[addressLower] ?? null
     const displayName = customNames[addressLower] ?? displayNames[addressLower] ?? null
+    const bio = customBios[addressLower] ?? null
     setProfileError(null)
     setProfileSaving(true)
     try {
@@ -7180,12 +7243,14 @@ function App() {
       profileCacheRef.current[addressLower] = {
         displayName,
         avatarUrl: null,
+        bio,
         ts: Date.now(),
       }
       const row = await saveProfile({
         address: addressLower,
         display_name: customNames[addressLower] ?? null,
         avatar_url: null,
+        bio,
         updated_at: new Date().toISOString(),
       })
       if (row) {
@@ -7200,6 +7265,7 @@ function App() {
         profileCacheRef.current[addressLower] = {
           displayName: row.display_name ?? null,
           avatarUrl: null,
+          bio: row.bio ?? bio,
           ts: Date.now(),
         }
       } else {
@@ -7208,6 +7274,7 @@ function App() {
       emitProfileSync(
         row?.display_name ?? customNames[addressLower] ?? null,
         null,
+        row?.bio ?? bio,
       )
     } catch (err) {
       console.error('AGW avatar switch error:', err)
@@ -7216,6 +7283,7 @@ function App() {
         profileCacheRef.current[addressLower] = {
           displayName,
           avatarUrl: previousAvatar,
+          bio,
           ts: Date.now(),
         }
         setNftPickerUseAgwAvatar(false)
@@ -8677,16 +8745,21 @@ function App() {
               <div className="modal__title">{t.profileTitle}</div>
               <button
                 className="btn btn--ghost settings__control settings__control--sm modal__close modal__close--plain"
-                onClick={() => setProfileOpen(false)}
+                onClick={() => {
+                  void handleToggleProfileEditing()
+                }}
+                disabled={!address || profileSaving}
               >
-                Close
+                {profileEditing ? 'Done' : t.edit}
               </button>
             </div>
             <div className="profile">
               <button
-                className={`profile__avatar profile__avatar-button ${address ? 'profile__avatar--editable' : ''}`}
+                className={`profile__avatar profile__avatar-button ${
+                  address && profileEditing ? 'profile__avatar--editable' : ''
+                }`}
                 onClick={handleOpenNftPicker}
-                disabled={!address || profileSaving}
+                disabled={!address || profileSaving || !profileEditing}
                 type="button"
                 aria-label={t.profileChooseNftAvatar}
                 title={t.profileChooseNftAvatar}
@@ -8720,16 +8793,6 @@ function App() {
               </button>
               <div className="profile__row">
                 <div className="profile__address">{profileLabel}</div>
-                <button
-                  className="btn btn--ghost settings__control settings__control--sm"
-                  onClick={() => {
-                    setProfileEditing(true)
-                    setProfileError(null)
-                  }}
-                  disabled={!address}
-                >
-                  {t.edit}
-                </button>
               </div>
               <div className="profile__meta">
                 <div className="profile__meta-label">{t.walletPrefix.slice(0, -1)}</div>
@@ -8745,21 +8808,15 @@ function App() {
                     value={profileNameDraft}
                     onChange={(event) => setProfileNameDraft(event.target.value)}
                   />
-                  <div className="profile__actions">
-                    <button
-                      className="btn settings__control"
-                      onClick={handleProfileSave}
-                      disabled={profileSaving || !address}
-                    >
-                      {profileSaving ? 'Saving...' : t.save}
-                    </button>
-                    <button
-                      className="btn btn--ghost settings__control"
-                      onClick={handleProfileCancel}
-                      disabled={profileSaving}
-                    >
-                      {t.profileCancel}
-                    </button>
+                  <textarea
+                    className="input profile__input profile__textarea"
+                    placeholder={t.profileBioPlaceholder}
+                    value={profileBioDraft}
+                    onChange={(event) => setProfileBioDraft(event.target.value.slice(0, 67))}
+                    rows={3}
+                  />
+                  <div className="profile__meta-label">
+                    {profileBioDraft.length}/67 · {t.profileBioLimit}
                   </div>
                 </div>
               )}
@@ -8927,6 +8984,7 @@ function App() {
                 src={displayAvatars[peerProfileAddressLower] ?? undefined}
               />
               <div className="peer-profile__name">{peerProfileLabel}</div>
+              {peerProfileBio && <div className="peer-profile__bio">{peerProfileBio}</div>}
               <div className="peer-profile__address">{peerProfileAddressLower}</div>
             </div>
           </div>
