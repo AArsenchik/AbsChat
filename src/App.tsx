@@ -2599,9 +2599,10 @@ function App() {
   ])
 
   const loadProfiles = useCallback(
-    async (addresses: string[]) => {
+    async (addresses: string[], options?: { force?: boolean }) => {
       if (!backendAuthed || addresses.length === 0) return
       const now = Date.now()
+      const force = options?.force === true
       const cachedNameUpdates: Record<string, string | null> = {}
       const cachedAvatarUpdates: Record<string, string | null> = {}
       const cachedBioUpdates: Record<string, string | null> = {}
@@ -2609,7 +2610,7 @@ function App() {
       addresses.forEach((address) => {
         const key = address.toLowerCase()
         const cached = profileCacheRef.current[key]
-        if (cached) {
+        if (cached && !force) {
           const isFresh = now - cached.ts < SUPABASE_PROFILE_CACHE_TTL
           if (isFresh) {
             cachedNameUpdates[key] = cached.displayName ?? null
@@ -6929,7 +6930,7 @@ function App() {
     const peerLower = peer.toLowerCase()
     if (isGroupId(peerLower)) return
     setPeerProfileAddress(peerLower)
-    void loadProfiles([peerLower])
+    void loadProfiles([peerLower], { force: true })
   }, [loadProfiles])
 
   const handleCreateSecretChatAction = useCallback(
