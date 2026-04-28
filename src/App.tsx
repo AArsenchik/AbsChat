@@ -2650,11 +2650,15 @@ function App() {
         received.add(key)
         nameUpdates[key] = item.display_name ?? null
         avatarUpdates[key] = item.avatar_url ?? null
-        bioUpdates[key] = item.bio ?? null
+        const hasBioField = Object.prototype.hasOwnProperty.call(item, 'bio')
+        const cachedBio = profileCacheRef.current[key]?.bio ?? null
+        const currentBio = customBiosRef.current[key] ?? null
+        const nextBio = hasBioField ? item.bio ?? null : currentBio ?? cachedBio
+        bioUpdates[key] = nextBio
         profileCacheRef.current[key] = {
           displayName: item.display_name ?? null,
           avatarUrl: item.avatar_url ?? null,
-          bio: item.bio ?? null,
+          bio: nextBio,
           ts: now,
         }
       })
@@ -7093,7 +7097,10 @@ function App() {
     }
     setProfileSaving(true)
     const previousName = customNames[addressLower] ?? null
+    const previousBio = customBios[addressLower] ?? null
+    const previousAvatar = customAvatars[addressLower] ?? null
     setCustomNames((prev) => ({ ...prev, [addressLower]: nextName || null }))
+    setCustomBios((prev) => ({ ...prev, [addressLower]: nextBio || null }))
     try {
       const row = await saveProfile({
         address: addressLower,
@@ -7102,29 +7109,20 @@ function App() {
         bio: nextBio || null,
         updated_at: new Date().toISOString(),
       })
-      if (row) {
-        setCustomNames((prev) => ({
-          ...prev,
-          [addressLower]: row.display_name ?? null,
-        }))
-        setCustomAvatars((prev) => ({
-          ...prev,
-          [addressLower]: row.avatar_url ?? null,
-        }))
-        setCustomBios((prev) => ({
-          ...prev,
-          [addressLower]: row.bio ?? null,
-        }))
-      } else {
-        setCustomNames((prev) => ({ ...prev, [addressLower]: nextName || null }))
-        setCustomBios((prev) => ({ ...prev, [addressLower]: nextBio || null }))
-        await loadProfiles([addressLower])
+      const resolvedName = nextName || null
+      const resolvedAvatar = row?.avatar_url ?? customAvatars[addressLower] ?? null
+      const hasBioField = row ? Object.prototype.hasOwnProperty.call(row, 'bio') : false
+      const resolvedBio = hasBioField ? row?.bio ?? null : nextBio || null
+      setCustomNames((prev) => ({ ...prev, [addressLower]: resolvedName }))
+      setCustomAvatars((prev) => ({ ...prev, [addressLower]: resolvedAvatar }))
+      setCustomBios((prev) => ({ ...prev, [addressLower]: resolvedBio }))
+      profileCacheRef.current[addressLower] = {
+        displayName: resolvedName,
+        avatarUrl: resolvedAvatar,
+        bio: resolvedBio,
+        ts: Date.now(),
       }
-      emitProfileSync(
-        row?.display_name ?? (nextName || null),
-        row ? row.avatar_url ?? null : customAvatars[addressLower] ?? null,
-        row ? row.bio ?? null : nextBio || null,
-      )
+      emitProfileSync(resolvedName, resolvedAvatar, resolvedBio)
       if (!nextName) {
         const fallbackAddresses =
           signerAddressLower && signerAddressLower !== addressLower
@@ -7136,8 +7134,8 @@ function App() {
           fallbackAddresses,
         ).catch(() => {})
       }
-      setProfileNameDraft(nextName)
-      setProfileBioDraft(nextBio)
+      setProfileNameDraft(resolvedName ?? '')
+      setProfileBioDraft(resolvedBio ?? '')
       setProfileEditing(false)
     } catch (err) {
       console.error('Profile save error:', err)
@@ -7151,6 +7149,13 @@ function App() {
           setProfileError(errorMessage)
         }
         setCustomNames((prev) => ({ ...prev, [addressLower]: previousName }))
+        setCustomBios((prev) => ({ ...prev, [addressLower]: previousBio }))
+        profileCacheRef.current[addressLower] = {
+          displayName: previousName,
+          avatarUrl: previousAvatar,
+          bio: previousBio,
+          ts: Date.now(),
+        }
       }
     } finally {
       setProfileSaving(false)
@@ -7192,6 +7197,8 @@ function App() {
         updated_at: new Date().toISOString(),
       })
       if (row) {
+        const hasBioField = Object.prototype.hasOwnProperty.call(row, 'bio')
+        const syncedBio = hasBioField ? row.bio ?? null : bio
         setCustomNames((prev) => ({
           ...prev,
           [addressLower]: row.display_name ?? null,
@@ -7200,10 +7207,11 @@ function App() {
           ...prev,
           [addressLower]: avatarUrl,
         }))
+        setCustomBios((prev) => ({ ...prev, [addressLower]: syncedBio }))
         profileCacheRef.current[addressLower] = {
           displayName: row.display_name ?? null,
           avatarUrl,
-          bio: row.bio ?? bio,
+          bio: syncedBio,
           ts: Date.now(),
         }
       } else {
@@ -7212,7 +7220,7 @@ function App() {
       emitProfileSync(
         row?.display_name ?? customNames[addressLower] ?? null,
         avatarUrl,
-        row?.bio ?? bio,
+        row && Object.prototype.hasOwnProperty.call(row, 'bio') ? row.bio ?? null : bio,
       )
     } catch (err) {
       console.error('NFT avatar save error:', err)
@@ -7258,6 +7266,8 @@ function App() {
         updated_at: new Date().toISOString(),
       })
       if (row) {
+        const hasBioField = Object.prototype.hasOwnProperty.call(row, 'bio')
+        const syncedBio = hasBioField ? row.bio ?? null : bio
         setCustomNames((prev) => ({
           ...prev,
           [addressLower]: row.display_name ?? null,
@@ -7266,10 +7276,11 @@ function App() {
           ...prev,
           [addressLower]: null,
         }))
+        setCustomBios((prev) => ({ ...prev, [addressLower]: syncedBio }))
         profileCacheRef.current[addressLower] = {
           displayName: row.display_name ?? null,
           avatarUrl: null,
-          bio: row.bio ?? bio,
+          bio: syncedBio,
           ts: Date.now(),
         }
       } else {
@@ -7278,7 +7289,7 @@ function App() {
       emitProfileSync(
         row?.display_name ?? customNames[addressLower] ?? null,
         null,
-        row?.bio ?? bio,
+        row && Object.prototype.hasOwnProperty.call(row, 'bio') ? row.bio ?? null : bio,
       )
     } catch (err) {
       console.error('AGW avatar switch error:', err)
