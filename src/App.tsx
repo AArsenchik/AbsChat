@@ -4705,8 +4705,9 @@ function App() {
           avatarUrl?: string | null
           bio?: string | null
         }
-        if (!data?.from || !data?.to) return
-        if (data.to.toLowerCase() !== addressLower) return
+        if (!data?.from) return
+        const target = String(data.to ?? '').toLowerCase()
+        if (target && target !== 'all' && target !== addressLower) return
         const key = data.from.toLowerCase()
         if (data.displayName !== undefined) {
           setCustomNames((prev) => ({ ...prev, [key]: data.displayName ?? null }))
@@ -4716,6 +4717,19 @@ function App() {
         }
         if (data.bio !== undefined) {
           setCustomBios((prev) => ({ ...prev, [key]: data.bio ?? null }))
+        }
+        profileCacheRef.current[key] = {
+          displayName:
+            data.displayName !== undefined
+              ? data.displayName ?? null
+              : profileCacheRef.current[key]?.displayName ?? null,
+          avatarUrl:
+            data.avatarUrl !== undefined
+              ? data.avatarUrl ?? null
+              : profileCacheRef.current[key]?.avatarUrl ?? null,
+          bio:
+            data.bio !== undefined ? data.bio ?? null : profileCacheRef.current[key]?.bio ?? null,
+          ts: Date.now(),
         }
       })
       .on('broadcast', { event: 'peer_visibility' }, (payload: { payload: unknown }) => {
@@ -4816,7 +4830,7 @@ function App() {
         event: 'profile',
         payload: {
           from: addressLower,
-          to: addressLower,
+          to: 'all',
           displayName,
           avatarUrl,
           bio,
