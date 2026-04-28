@@ -5,6 +5,15 @@ const json = (res, status, body) => {
   res.end(JSON.stringify(body))
 }
 
+const isMissingBioColumnError = (error) => {
+  const message = String(error?.message ?? '').toLowerCase()
+  return (
+    message.includes("could not find the 'bio' column") ||
+    message.includes('column profiles.bio does not exist') ||
+    message.includes('schema cache')
+  )
+}
+
 export default async function handler(req, res) {
   const supabase = getSupabaseAdmin()
   if (!supabase) {
@@ -27,10 +36,18 @@ export default async function handler(req, res) {
       json(res, 200, { data: [] })
       return
     }
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from('profiles')
       .select('address, display_name, avatar_url, bio')
       .in('address', addresses)
+    if (error && isMissingBioColumnError(error)) {
+      const fallback = await supabase
+        .from('profiles')
+        .select('address, display_name, avatar_url')
+        .in('address', addresses)
+      data = fallback.data
+      error = fallback.error
+    }
     if (error) {
       json(res, 500, { error: error.message })
       return
@@ -71,20 +88,27 @@ export default async function handler(req, res) {
         return
       }
     }
-    const upsertPayload = {
+    const baseUpsertPayload = {
       address,
       display_name: displayName,
       avatar_url: typeof payload.avatar_url === 'string' ? payload.avatar_url : null,
-      bio,
       updated_at:
         typeof payload.updated_at === 'string'
           ? payload.updated_at
           : new Date().toISOString(),
     }
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from('profiles')
-      .upsert([upsertPayload], { onConflict: 'address' })
+      .upsert([{ ...baseUpsertPayload, bio }], { onConflict: 'address' })
       .select('address, display_name, avatar_url, bio')
+    if (error && isMissingBioColumnError(error)) {
+      const fallback = await supabase
+        .from('profiles')
+        .upsert([baseUpsertPayload], { onConflict: 'address' })
+        .select('address, display_name, avatar_url')
+      data = fallback.data
+      error = fallback.error
+    }
     if (error) {
       json(res, 500, { error: error.message })
       return
