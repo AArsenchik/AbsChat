@@ -6902,6 +6902,7 @@ function App() {
     addressLower && displayNames[addressLower]
       ? displayNames[addressLower]
       : address ?? '—'
+  const profileBioValue = addressLower ? customBios[addressLower] ?? null : null
   const peerProfileAddressLower = peerProfileAddress?.toLowerCase() ?? ''
   const peerProfileLabel = peerProfileAddressLower
     ? displayNames[peerProfileAddressLower] || shorten(peerProfileAddressLower)
@@ -8824,7 +8825,7 @@ function App() {
                   {connected ? shorten(address) : t.walletConnect}
                 </div>
               </div>
-              {profileEditing && (
+              {profileEditing ? (
                 <div className="profile__edit">
                   <textarea
                     className="input profile__input profile__textarea"
@@ -8836,6 +8837,11 @@ function App() {
                   <div className="profile__meta-label">
                     {profileBioDraft.length}/67 · {t.profileBioLimit}
                   </div>
+                </div>
+              ) : (
+                <div className="profile__meta profile__meta--bio">
+                  <div className="profile__meta-label">{t.profileBioPlaceholder}</div>
+                  <div className="profile__bio-value">{profileBioValue || '—'}</div>
                 </div>
               )}
               {profileError && <div className="error">{profileError}</div>}
@@ -9002,8 +9008,11 @@ function App() {
                 src={displayAvatars[peerProfileAddressLower] ?? undefined}
               />
               <div className="peer-profile__name">{peerProfileLabel}</div>
-              {peerProfileBio && <div className="peer-profile__bio">{peerProfileBio}</div>}
               <div className="peer-profile__address">{peerProfileAddressLower}</div>
+              <div className="peer-profile__bio">
+                <div className="peer-profile__label">{t.profileBioPlaceholder}</div>
+                <div className="peer-profile__bio-value">{peerProfileBio || '—'}</div>
+              </div>
             </div>
           </div>
         </div>

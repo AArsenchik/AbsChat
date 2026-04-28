@@ -318,7 +318,7 @@ html, body {
 }
 
 .profile__name-display {
-  font-size: 42px;
+  font-size: 36px;
   line-height: 1.1;
   font-weight: 700;
   color: var(--text);
@@ -333,7 +333,7 @@ html, body {
 .profile__name-input {
   width: 100%;
   text-align: center;
-  font-size: 42px;
+  font-size: 36px;
   line-height: 1.1;
   font-weight: 700;
   border: none;
@@ -354,6 +354,19 @@ html, body {
   border-radius: 16px;
   padding: 12px 14px;
   background: linear-gradient(135deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.02));
+}
+
+.profile__meta--bio {
+  gap: 8px;
+}
+
+.profile__bio-value {
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  min-height: 22px;
 }
 
 .profile__meta-label {
@@ -542,13 +555,26 @@ html, body {
 
 .peer-profile__bio {
   width: 100%;
-  font-size: 14px;
-  line-height: 1.45;
-  color: var(--text);
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 12px;
   padding: 10px 12px;
   background: rgba(255, 255, 255, 0.03);
+  text-align: left;
+}
+
+.peer-profile__label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.peer-profile__bio-value {
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--text);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -2800,7 +2826,7 @@ html, body {
 @media (max-width: 720px) {
   .profile__name-display,
   .profile__name-input {
-    font-size: 34px;
+    font-size: 30px;
   }
 
   .modal__content--group-create {
@@ -2831,7 +2857,7 @@ html, body {
 @media (max-width: 520px) {
   .profile__name-display,
   .profile__name-input {
-    font-size: 28px;
+    font-size: 26px;
   }
 
   .group-create__hero {
